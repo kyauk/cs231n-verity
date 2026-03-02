@@ -1,0 +1,289 @@
+---
+description: API contracts and interface boundaries between all major modules in Triage Refinery. When writing code that crosses a module boundary, always check this file first.
+alwaysApply: false
+---
+# Triage Refinery: Interfaces & API Contracts
+
+## What This File Is For
+Any time two modules talk to each other — the frontend calling the backend, a FastAPI route kicking off the LangGraph pipeline, an agent node reading from the DB — the shape of the data they exchange must match exactly. This file defines those shapes and rules. If you are writing code that **produces or consumes data at a module boundary**, check the relevant contract here before writing a single field name.
+
+A contract violation (e.g. the backend returns `capsule_id` but the frontend expects `id`) will cause a silent runtime failure that is hard to debug. Pydantic is your enforcement mechanism — use it at every boundary.
+
+---
+
+## 1. The Four Boundaries
+
+```
+[Next.js Frontend]
+        ↕  HTTP/JSON  (Boundary 1)
+[FastAPI Backend]
+        ↕  Python function call + Pydantic  (Boundary 2)
+[LangGraph Agent Pipeline]
+        ↕  async function call + Pydantic  (Boundary 3)
+[DB / Vector Store Layer]
+        ↕  async function call + Pydantic  (Boundary 4)
+[LLM Service (NVIDIA NIM)]
+```
+
+Each boundary has a defined contract below. **Never pass raw dicts across a boundary.** Always use the Pydantic model for that boundary.
+
+---
+
+## 2. Boundary 1 — Frontend (Next.js) ↔ Backend (FastAPI)
+
+### Rules
+- All request and response bodies are JSON.
+- TypeScript interfaces on the frontend must mirror the Pydantic models on the backend field-for-field.
+- If a backend schema changes, the corresponding TypeScript interface in `/frontend/types/` must be updated in the same PR.
+- Use `camelCase` for all JSON field names (FastAPI's `alias_generator` or `by_alias=True` handles the conversion from Python's `snake_case`).
+
+### Core Contracts
+
+**Ingest a failure ticket**
+```
+POST /ingest/failure_ticket
+
+Request:
+{
+  "sourceType": "jira" | "slack" | "manual",
+  "sourceRef": string,
+  "title": string,
+  "rawText": string,
+  "eventTimestamp": string (ISO 8601),
+  "agentId": string | null,
+  "scenarioId": string | null,
+  "artifactsRef": string[] | null
+}
+
+Response:
+{
+  "ticketId": string (UUID),
+  "status": "received" | "processing" | "failed",
+  "message": string
+}
+```
+
+**Get a failure capsule**
+```
+GET /fetch/failure_capsule/{capsule_id}
+
+Response:
+{
+  "capsuleId": string (UUID),
+  "ticketId": string (UUID),
+  "triageSummary": string,
+  "scenarioType": string | null,
+  "failureModeHints": string[],
+  "likelySubsystem": string | null,
+  "severityCue": "critical" | "high" | "medium" | "low" | "unknown",
+  "keyTimestamp": string (ISO 8601) | null,
+  "tags": string[],
+  "createdAt": string (ISO 8601)
+}
+```
+
+**Get similar cases**
+```
+POST /retrieve/similar_cases
+
+Request:
+{
+  "capsuleId": string (UUID),
+  "topK": number (default: 5)
+}
+
+Response:
+{
+  "capsuleId": string (UUID),
+  "results": [
+    {
+      "similarCapsuleId": string (UUID),
+      "similarityScore": number (0.0–1.0),
+      "matchReason": string,
+      "triageSummary": string,
+      "resolution": string | null,
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
+}
+```
+
+**Get hypotheses**
+```
+POST /generate/hypotheses
+
+Request:
+{
+  "capsuleId": string (UUID)
+}
+
+Response:
+{
+  "capsuleId": string (UUID),
+  "hypotheses": [
+    {
+      "hypothesisId": string (UUID),
+      "description": string,
+      "confidence": "high" | "medium" | "low" | "uncertain" | "insufficient_evidence",
+      "supportingEvidence": string[],
+      "additionalSignalNeeded": string | null
+    }
+  ]
+}
+```
+
+**Get assembled workspace**
+```
+GET /assemble/workspace/{capsule_id}
+
+Response:
+{
+  "capsuleId": string (UUID),
+  "capsule": FailureCapsule,
+  "similarCases": SimilarCase[],
+  "hypotheses": Hypothesis[],
+  "recommendedSteps": string[],
+  "relevantResources": [
+    {
+      "label": string,
+      "url": string,
+      "resourceType": "replay" | "log" | "doc" | "simulation" | "other"
+    }
+  ]
+}
+```
+
+---
+
+## 3. Boundary 2 — FastAPI Routes ↔ LangGraph Pipeline
+
+### Rules
+- FastAPI route handlers must never contain business logic. Their only jobs are: validate the incoming request, call the appropriate pipeline entry function, and return the response.
+- The pipeline is invoked by passing a single typed `PipelineInput` Pydantic model. The route never passes individual keyword arguments.
+- The pipeline returns a single typed `PipelineOutput` Pydantic model. The route maps this to the HTTP response schema.
+
+### Contract
+
+```python
+# /backend/models/pipeline_io.py — imported by both routes and agents
+
+class PipelineInput(BaseModel):
+    ticket_id: str
+    source_type: str
+    source_ref: str
+    title: str
+    raw_text: str
+    event_timestamp: datetime
+    agent_id: Optional[str]
+    scenario_id: Optional[str]
+    artifacts_ref: Optional[list[str]]
+
+class PipelineOutput(BaseModel):
+    capsule_id: str
+    triage_summary: str
+    hypotheses: list[HypothesisResult]
+    similar_cases: list[SimilarCaseResult]
+    recommended_steps: list[str]
+    pipeline_status: Literal["complete", "partial", "failed"]
+    error_message: Optional[str]
+```
+
+---
+
+## 4. Boundary 3 — Agent Nodes ↔ DB / Vector Store Layer
+
+### Rules
+- Agent nodes never write raw SQL. All DB access goes through repository functions in `/backend/db/`.
+- Repository functions always accept and return **Pydantic models**, not raw dicts or ORM objects.
+- Vector similarity queries always return a `SimilarCaseResult` list, never raw embedding arrays.
+
+### Contract
+
+```python
+# /backend/db/capsule_repo.py
+
+async def save_capsule(capsule: FailureCapsuleRecord) -> str:
+    '''Returns the saved capsule_id (UUID string).'''
+
+async def get_capsule(capsule_id: str) -> FailureCapsuleRecord | None:
+    '''Returns None if not found — callers must handle this explicitly.'''
+
+async def cosine_search(embedding: list[float], top_k: int) -> list[SimilarCaseResult]:
+    '''Returns ranked list of similar capsules via pgvector <=> operator.'''
+
+# /backend/models/db_records.py
+
+class FailureCapsuleRecord(BaseModel):
+    capsule_id: str
+    ticket_id: str
+    triage_summary: str
+    scenario_type: Optional[str]
+    failure_mode_hints: list[str]
+    likely_subsystem: Optional[str]
+    severity_cue: str
+    key_timestamp: Optional[datetime]
+    tags: list[str]
+    embedding: list[float]   # 1536-dim vector from NVIDIA embedding model
+    created_at: datetime
+
+class SimilarCaseResult(BaseModel):
+    similar_capsule_id: str
+    similarity_score: float   # 0.0–1.0, higher = more similar
+    match_reason: str
+    triage_summary: str
+    resolution: Optional[str]
+    confidence: Literal["high", "medium", "low"]
+```
+
+---
+
+## 5. Boundary 4 — LLM Service ↔ Agent Nodes
+
+### Rules
+- All LLM calls are centralized in `/backend/services/llm_client.py`. Agent nodes never instantiate their own LLM clients.
+- Every LLM call is wrapped in a typed function that returns a Pydantic model — never a raw string.
+- Prompt templates live in `/backend/services/prompts/` as `.py` files, not hardcoded inline.
+
+### Contract
+
+```python
+# /backend/services/llm_client.py
+
+async def generate_triage_summary(raw_text: str, metadata: dict) -> TriageSummaryResult:
+    '''Calls NVIDIA NIM to produce a structured triage summary from raw ticket text.'''
+
+async def generate_hypotheses(capsule: FailureCapsuleRecord, similar_cases: list[SimilarCaseResult]) -> list[HypothesisResult]:
+    '''Calls NVIDIA NIM to produce 2–3 root cause hypotheses with confidence levels.'''
+
+async def generate_embedding(text: str) -> list[float]:
+    '''Calls NVIDIA NIM embedding endpoint. Returns 1536-dim float vector.'''
+
+# /backend/models/llm_outputs.py
+
+class TriageSummaryResult(BaseModel):
+    summary: str
+    scenario_type: Optional[str]
+    failure_mode_hints: list[str]
+    likely_subsystem: Optional[str]
+    severity_cue: Literal["critical", "high", "medium", "low", "unknown"]
+    tags: list[str]
+
+class HypothesisResult(BaseModel):
+    hypothesis_id: str
+    description: str
+    confidence: Literal["high", "medium", "low", "uncertain", "insufficient_evidence"]
+    supporting_evidence: list[str]
+    additional_signal_needed: Optional[str]
+```
+
+---
+
+## 6. Contract Enforcement Rules
+
+Since the team is new to formal API contracts, follow these practical habits to prevent breakage:
+
+1. **One source of truth.** Every shared schema lives in `/backend/models/`. Never redefine the same shape in two places.
+2. **Same PR rule.** If you change a Pydantic model, you must update every caller of that model *in the same PR*. A PR that changes a schema without updating consumers will be rejected in review.
+3. **Frontend mirrors backend.** For every Pydantic response model, there is a matching TypeScript interface in `/frontend/types/api.ts`. These stay in sync manually — check the file before adding a new field.
+4. **No raw dicts at boundaries.** If you find yourself writing `response["field"]` instead of `response.field` at a module boundary, you are missing a Pydantic model.
+5. **Null handling is explicit.** If a field can be `null`, it must be typed `Optional` in Pydantic and `| null` in TypeScript. Never assume a field is always present.
