@@ -12,9 +12,6 @@ venv/
 .venv/
 env/
 
-# UI (still in development)
-ui/
-
 # Pipeline output
 output/
 

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LIBERO Perturbation Pipeline</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-inner">
+        <h1 class="logo">LIBERO<span class="logo-plus">+</span> Perturbation Pipeline</h1>
+        <p class="subtitle">Generate robustness test variants for VLA models</p>
+      </div>
+    </header>
+
+    <!-- Step indicator -->
+    <nav class="steps-nav">
+      <div class="step-item active" data-step="1">
+        <span class="step-num">1</span>
+        <span class="step-label">Select Scene</span>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step-item" data-step="2">
+        <span class="step-num">2</span>
+        <span class="step-label">Configure</span>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step-item" data-step="3">
+        <span class="step-num">3</span>
+        <span class="step-label">Generate</span>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step-item" data-step="4">
+        <span class="step-num">4</span>
+        <span class="step-label">Results</span>
+      </div>
+    </nav>
+
+    <!-- Step 1: Scene Selection -->
+    <section class="step-panel active" id="step-1">
+      <div class="panel-content">
+        <h2>Choose a Source Scene</h2>
+        <p class="hint">Upload your own BDDL file or pick from 90 example scenes.</p>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="examples">Example Scenes</button>
+          <button class="tab" data-tab="upload">Upload File</button>
+        </div>
+
+        <!-- Examples tab -->
+        <div class="tab-panel active" id="tab-examples">
+          <div class="search-bar">
+            <input type="text" id="scene-search" placeholder="Search scenes..." autocomplete="off" />
+          </div>
+          <div id="examples-list" class="examples-list">
+            <div class="loading-spinner">Loading examples...</div>
+          </div>
+        </div>
+
+        <!-- Upload tab -->
+        <div class="tab-panel" id="tab-upload">
+          <div class="upload-zone" id="upload-zone">
+            <div class="upload-icon">&#8593;</div>
+            <p>Drag &amp; drop a <strong>.bddl</strong> file here</p>
+            <p class="hint">or click to browse</p>
+            <input type="file" id="file-input" accept=".bddl" hidden />
+          </div>
+          <div id="upload-status" class="upload-status" hidden></div>
+        </div>
+
+        <!-- Selected scene info -->
+        <div id="selected-info" class="selected-info" hidden>
+          <div class="selected-card">
+            <span class="selected-badge">Selected</span>
+            <p class="selected-name" id="selected-name"></p>
+            <p class="selected-lang" id="selected-lang"></p>
+          </div>
+          <button class="btn primary" id="btn-next-1">Continue &rarr;</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: Perturbation Configuration -->
+    <section class="step-panel" id="step-2">
+      <div class="panel-content">
+        <h2>Configure Perturbations</h2>
+        <p class="hint">Enable the dimensions you want and set variant counts.</p>
+
+        <div class="pert-grid" id="pert-grid">
+          <!-- Object Layout -->
+          <div class="pert-card" data-dim="object_layout">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Object Layout</h3>
+            </div>
+            <p class="pert-desc">Shift object placement regions in the scene</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+              <label>Severity
+                <select class="severity-select">
+                  <option value="1">1 (subtle)</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3 (default)</option>
+                  <option value="4">4</option>
+                  <option value="5">5 (extreme)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Camera Viewpoint -->
+          <div class="pert-card" data-dim="camera">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Camera Viewpoint</h3>
+            </div>
+            <p class="pert-desc">Vary camera position, angle, and field of view</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+            </div>
+          </div>
+
+          <!-- Robot Initial State -->
+          <div class="pert-card" data-dim="robot_init">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Robot Initial State</h3>
+            </div>
+            <p class="pert-desc">Change the robot arm's starting pose</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+              <label>Severity
+                <select class="severity-select">
+                  <option value="1">1 (subtle)</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3 (default)</option>
+                  <option value="4">4</option>
+                  <option value="5">5 (extreme)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Sensor Noise -->
+          <div class="pert-card" data-dim="noise">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Sensor Noise</h3>
+            </div>
+            <p class="pert-desc">Apply visual distortions (blur, fog, etc.)</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+              <label>Type
+                <select class="noise-select">
+                  <option value="">All types</option>
+                  <option value="motion_blur">Motion blur</option>
+                  <option value="gaussian_blur">Gaussian blur</option>
+                  <option value="zoom_blur">Zoom blur</option>
+                  <option value="fog">Fog</option>
+                  <option value="glass_blur">Glass blur</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Background Texture -->
+          <div class="pert-card" data-dim="texture">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Background Texture</h3>
+            </div>
+            <p class="pert-desc">Swap table and surface appearances</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+            </div>
+          </div>
+
+          <!-- Lighting -->
+          <div class="pert-card" data-dim="lighting">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Lighting</h3>
+            </div>
+            <p class="pert-desc">Modify intensity, direction, color, and shadows</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+            </div>
+          </div>
+
+          <!-- Language -->
+          <div class="pert-card" data-dim="language">
+            <div class="pert-header">
+              <label class="toggle">
+                <input type="checkbox" checked /><span class="toggle-slider"></span>
+              </label>
+              <h3>Language</h3>
+            </div>
+            <p class="pert-desc">Paraphrase the task instruction</p>
+            <div class="pert-controls">
+              <label>Variants <input type="number" class="variant-count" value="3" min="1" max="10" /></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn secondary" id="btn-back-2">&larr; Back</button>
+          <button class="btn primary" id="btn-generate">Generate Perturbations</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: Generation Progress -->
+    <section class="step-panel" id="step-3">
+      <div class="panel-content">
+        <h2>Generating Variants...</h2>
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <p class="progress-text" id="progress-text">Starting...</p>
+        </div>
+
+        <div class="dim-status-grid" id="dim-status-grid"></div>
+
+        <div class="log-box" id="log-box"></div>
+      </div>
+    </section>
+
+    <!-- Step 4: Results -->
+    <section class="step-panel" id="step-4">
+      <div class="panel-content">
+        <div class="results-header">
+          <h2>Results</h2>
+          <button class="btn primary" id="btn-download">Download All</button>
+        </div>
+        <p class="results-summary" id="results-summary"></p>
+
+        <div class="gallery-filters" id="gallery-filters"></div>
+        <div class="gallery" id="gallery"></div>
+
+        <!-- Lightbox -->
+        <div class="lightbox" id="lightbox" style="display:none">
+          <div class="lightbox-backdrop"></div>
+          <div class="lightbox-content">
+            <button class="lightbox-close">&times;</button>
+            <img id="lightbox-img" src="" alt="" />
+            <div class="lightbox-info" id="lightbox-info"></div>
+          </div>
+        </div>
+
+        <div class="btn-row" style="margin-top:2rem">
+          <button class="btn secondary" id="btn-restart">New Generation</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+
+</html>
