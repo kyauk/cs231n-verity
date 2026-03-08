@@ -2,24 +2,25 @@
 globs: "backend/agents/**/*"
 alwaysApply: false
 ---
-# Triage Refinery: Agent Memory Architecture
+# Edge Case Discovery Engine: Agent Memory Architecture
 
 ## What This File Is For
-The triage agent is a LangGraph pipeline where multiple nodes (ingestion, capsule generation, retrieval, hypothesis generation, workspace assembly) must share and build on each other's outputs within a single run. This file defines:
+
+The discovery pipeline is a LangGraph workflow where multiple nodes (ingestion, embedding, clustering, scene description, debate, report assembly) must share and build on each other's outputs within a single run. This file defines:
 
 - What the agent's working memory (LangGraph state) looks like at each stage
 - The rules for reading from and writing to that state
 - What gets flushed to the database at run completion
 - How uncertainty and confidence are tracked through state
-- How V1's multi-agent debate state extends V0
+- How V1 extensions (threshold calibration, temporal/cross-modal upgrades) extend V0
 
-**Memory scope: in-memory per run.** The LangGraph `TriageState` object lives only for the duration of one triage pipeline invocation. It is not shared across runs. At completion, a defined subset of state is persisted to PostgreSQL for future similar-case retrieval.
+**Memory scope: in-memory per run.** The LangGraph `DiscoveryState` object lives only for the duration of one discovery invocation. It is not shared across runs. At completion, a defined subset of state is persisted to PostgreSQL for reporting and feedback.
 
 ---
 
 ## 1. The Core State Object
 
-All agent nodes read from and write to a single typed `TriageState` object. This is the agent's working memory.
+All pipeline nodes read from and write to a single typed `DiscoveryState` object. This is the pipeline's working memory.
 
 ```python
 # /backend/agents/state.py
@@ -28,36 +29,38 @@ from typing import Optional, Literal
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-class HypothesisResult(BaseModel):
-    hypothesis_id: str
+class ClusterFinding(BaseModel):
+    cluster_id: str
+    anomaly_type: Literal["noise_point", "small_cluster", "high_glosh"]
+    glosh_score: float
+    representative_tokens: list[str]
+    sample_count: int
+
+class SceneDescription(BaseModel):
+    cluster_id: str
     description: str
-    confidence: Literal["high", "medium", "low", "uncertain", "insufficient_evidence"]
-    supporting_evidence: list[str]
-    additional_signal_needed: Optional[str]
+    scene_type: Optional[str]
+    complexity_cue: Literal["low", "medium", "high", "uncertain"]
+    representative_frame_refs: list[str]
 
-class SimilarCaseResult(BaseModel):
-    similar_capsule_id: str
-    similarity_score: float
-    match_reason: str
-    triage_summary: str
-    resolution: Optional[str]
-    confidence: Literal["high", "medium", "low"]
+class DebateVerdict(BaseModel):
+    cluster_id: str
+    is_critical: bool
+    in_suite: bool
+    adjacent_test: Optional[str]
+    recommendation: Literal["add_immediately", "already_covered", "not_critical"]
+    priority_score: float
+    debate_transcript: str
 
-class FailureCapsule(BaseModel):
-    capsule_id: str
-    triage_summary: str
-    scenario_type: Optional[str]
-    failure_mode_hints: list[str]
-    likely_subsystem: Optional[str]
-    severity_cue: Literal["critical", "high", "medium", "low", "unknown"]
-    key_timestamp: Optional[datetime]
-    tags: list[str]
-    embedding: list[float]          # 1536-dim, populated by capsule_generation_node
+class GapReportBuckets(BaseModel):
+    add_immediately: list[DebateVerdict] = Field(default_factory=list)
+    already_covered: list[DebateVerdict] = Field(default_factory=list)
+    not_critical: list[DebateVerdict] = Field(default_factory=list)
 
-class TriageState(BaseModel):
+class DiscoveryState(BaseModel):
     # --- Identity ---
     run_id: str                     # UUID, unique per pipeline invocation
-    ticket_id: str                  # UUID of the ingested raw ticket
+    corpus_id: str                  # UUID of ingested corpus job
 
     # --- Pipeline Progress ---
     current_node: str               # Name of the currently executing node
@@ -68,22 +71,25 @@ class TriageState(BaseModel):
     error_log: list[str]            # Append-only. Non-fatal errors go here; run continues.
     fatal_error: Optional[str]      # Set only if the run must halt. Triggers "failed" status.
 
-    # --- Raw Input (set by ingest_node, read-only after) ---
-    raw_ticket: dict                # Original normalized ticket fields
+    # --- Input Metadata (set by ingest_node, read-only after) ---
+    raw_corpus_ref: str
+    dataset_name: str
+    split_name: Optional[str]
 
-    # --- Capsule (set by capsule_generation_node) ---
-    capsule: Optional[FailureCapsule]
+    # --- Embeddings (set by embedding_node) ---
+    scene_tokens: list[str] = Field(default_factory=list)
+    scene_embeddings_ref: Optional[str] = None
 
-    # --- Retrieval (set by retrieval_node) ---
-    similar_cases: list[SimilarCaseResult] = Field(default_factory=list)
-    retrieval_confidence: Literal["high", "medium", "low", "no_results"] = "no_results"
+    # --- Clustering (set by clustering_node) ---
+    flagged_clusters: list[ClusterFinding] = Field(default_factory=list)
+    clustering_confidence: Literal["high", "medium", "low", "no_results"] = "no_results"
 
-    # --- Hypotheses (set by hypothesis_node) ---
-    hypotheses: list[HypothesisResult] = Field(default_factory=list)
+    # --- Scene Descriptions (set by description_node) ---
+    scene_descriptions: list[SceneDescription] = Field(default_factory=list)
 
-    # --- Workspace (set by workspace_assembly_node) ---
-    recommended_steps: list[str] = Field(default_factory=list)
-    relevant_resources: list[dict] = Field(default_factory=list)
+    # --- Debate and Report (set by debate_node/report_assembly_node) ---
+    debate_verdicts: list[DebateVerdict] = Field(default_factory=list)
+    gap_report: Optional[GapReportBuckets] = None
 
     # --- Agent Reasoning Trace (append-only, shown in workspace UI) ---
     reasoning_trace: list[dict] = Field(default_factory=list)
@@ -98,11 +104,12 @@ Each node has a defined set of fields it **owns** (writes) and fields it **reads
 
 | Node | Reads | Writes |
 |---|---|---|
-| `ingest_node` | — | `raw_ticket`, `ticket_id`, `current_node`, `completed_nodes` |
-| `capsule_generation_node` | `raw_ticket` | `capsule` |
-| `retrieval_node` | `capsule.embedding`, `capsule.capsule_id` | `similar_cases`, `retrieval_confidence` |
-| `hypothesis_node` | `capsule`, `similar_cases` | `hypotheses` |
-| `workspace_assembly_node` | `capsule`, `similar_cases`, `hypotheses` | `recommended_steps`, `relevant_resources` |
+| `ingest_node` | — | `raw_corpus_ref`, `dataset_name`, `split_name`, `corpus_id`, `current_node`, `completed_nodes` |
+| `embedding_node` | `raw_corpus_ref`, `dataset_name`, `split_name` | `scene_tokens`, `scene_embeddings_ref` (via NV-DINOv2 ViT-L NIM API, 4096d scene vectors) |
+| `clustering_node` | `scene_embeddings_ref` | `flagged_clusters`, `clustering_confidence` |
+| `description_node` | `flagged_clusters` | `scene_descriptions` |
+| `debate_node` | `flagged_clusters`, `scene_descriptions` | `debate_verdicts` |
+| `report_assembly_node` | `debate_verdicts` | `gap_report` |
 | Any node (on error) | — | `error_log` (append), `fatal_error` (if halting) |
 
 **Rule:** A node must call `state.completed_nodes.append(node_name)` and update `state.current_node` at the start and end of its execution. This is how the pipeline tracks progress.
@@ -111,15 +118,15 @@ Each node has a defined set of fields it **owns** (writes) and fields it **reads
 
 ## 3. The Reasoning Trace
 
-Every non-trivial decision an agent node makes must be logged to `state.reasoning_trace`. This is what gets surfaced in the Investigation Workspace so engineers can inspect and override the agent's reasoning.
+Every non-trivial decision a pipeline node makes must be logged to `state.reasoning_trace`. This is what gets surfaced in the Discovery Workspace so engineers can inspect and override pipeline reasoning.
 
 ### Format
 ```python
 state.reasoning_trace.append({
-    "node": "hypothesis_node",
-    "step": "hypothesis_generation",
-    "reasoning": "Two similar cases (IDs: abc, def) show matching subsystem 'perception' and scenario type 'occlusion'. Generated Hypothesis 1 with high confidence based on 3 corroborating evidence points.",
-    "uncertainty": "Timestamp gap between ticket and nearest similar case is 47 days — context may have shifted."
+    "node": "debate_node",
+    "step": "coverage_verdict",
+    "reasoning": "Cluster 19 is semantically coherent and not matched by existing suite scenarios; recommended add_immediately based on critic+safety+coverage agreement.",
+    "uncertainty": "Night-time glare may have inflated rarity scores for a subset of scenes."
 })
 ```
 
@@ -132,17 +139,17 @@ state.reasoning_trace.append({
 
 ## 4. Error Handling in State
 
-The agent distinguishes between **non-fatal errors** (run continues with degraded output) and **fatal errors** (run halts).
+The pipeline distinguishes between **non-fatal errors** (run continues with degraded output) and **fatal errors** (run halts).
 
 ```python
 # Non-fatal: log and continue
 state.error_log.append(
-    "retrieval_node: pgvector returned 0 results. Proceeding with empty similar_cases."
+    "clustering_node: sparse cluster labeling; proceeding with noise-point review only."
 )
-state.retrieval_confidence = "no_results"
+state.clustering_confidence = "low"
 
 # Fatal: set fatal_error and return immediately
-state.fatal_error = "capsule_generation_node: LLM returned unparseable response after 3 retries."
+state.fatal_error = "embedding_node: failed to load required camera images after retry budget."
 state.pipeline_status = "failed"
 return state
 ```
@@ -153,66 +160,65 @@ return state
 
 ## 5. State Persistence on Run Completion
 
-When the pipeline reaches `workspace_assembly_node` and `pipeline_status` is `"complete"` or `"partial"`, the following subset of state is persisted to PostgreSQL for future similar-case retrieval:
+When the pipeline reaches `report_assembly_node` and `pipeline_status` is `"complete"` or `"partial"`, the following subset of state is persisted to PostgreSQL:
 
 ```python
-# Fields flushed to the `failure_capsules` table:
-capsule_id, ticket_id, triage_summary, scenario_type,
-failure_mode_hints, likely_subsystem, severity_cue,
-key_timestamp, tags, embedding, created_at
+# Fields flushed to `scene_embeddings`:
+run_id, token, timestamp, scene_name, embedding, created_at
 
-# Fields flushed to the `run_traces` table (for agent inspection / override training):
-run_id, capsule_id, reasoning_trace, error_log,
-hypotheses, pipeline_status, completed_nodes
+# Fields flushed to `cluster_findings`:
+run_id, cluster_id, anomaly_type, glosh_score, representative_tokens
+
+# Fields flushed to `scene_descriptions`:
+run_id, cluster_id, description, scene_type, complexity_cue
+
+# Fields flushed to `debate_verdicts` and `gap_reports`:
+run_id, cluster_id, is_critical, in_suite, adjacent_test,
+recommendation, priority_score, debate_transcript, report_bucket
+
+# Fields flushed to `run_traces`:
+run_id, reasoning_trace, error_log, pipeline_status, completed_nodes
 ```
 
-**Not persisted:** `raw_ticket`, `current_node`, `similar_cases` (these are ephemeral per run), `relevant_resources`.
+**Not persisted:** `current_node`, temporary frame buffers, and transient node-local scratch data.
 
-**Rule:** Persistence is handled exclusively by `workspace_assembly_node` at the end of the run. No other node writes to the database directly — they only write to state.
+**Rule:** Persistence is handled exclusively by `report_assembly_node` at the end of the run. No other node writes directly to report tables — they only write to state.
 
 ---
 
-## 6. V1 Extension — Multi-Agent Debate State
+## 6. V1 Extension — Calibration and Modal Extensions
 
-In V1, the `hypothesis_node` is replaced by a three-node debate subgraph. The state object is extended with debate-specific fields. V0 fields are preserved unchanged.
+In V1, V0 debate stays intact while the state object is extended for threshold calibration, sequence reasoning, and cross-modal expansion. V0 fields remain unchanged.
 
 ```python
-class DebateEntry(BaseModel):
-    agent: Literal["proposal", "critic", "judge"]
-    hypothesis_id: str
-    argument: str
-    evidence_used: list[str]
-    retrieval_queries: list[str]    # logged to enforce critic blindness
+class CalibrationSignal(BaseModel):
+    run_id: str
+    cluster_id: str
+    original_priority_score: float
+    engineer_verdict: Literal["add_immediately", "already_covered", "not_critical"]
 
-class TriageStateV1(TriageState):
-    # Debate transcript — append-only, shown in full in workspace UI
-    debate_transcript: list[DebateEntry] = Field(default_factory=list)
-
-    # Proposal agent outputs (set before critic runs)
-    proposal_hypotheses: list[HypothesisResult] = Field(default_factory=list)
-
-    # Critic agent outputs (set independently, before seeing proposal conclusions)
-    critic_hypotheses: list[HypothesisResult] = Field(default_factory=list)
-
-    # Judge agent final verdict (set after receiving both)
-    judge_verdict: Optional[HypothesisResult] = None
-    judge_reasoning: Optional[str] = None
+class DiscoveryStateV1(DiscoveryState):
+    threshold_version: Optional[str] = None
+    calibration_signals: list[CalibrationSignal] = Field(default_factory=list)
+    sequence_ids: list[str] = Field(default_factory=list)
+    temporal_findings: list[dict] = Field(default_factory=list)
+    cross_modal_scores: list[float] = Field(default_factory=list)
 ```
 
-### Critical Constraint: Critic Isolation
-The critic node must complete its **retrieval** before it is given any access to `proposal_hypotheses`. Enforce this by running the critic as a separate subgraph invocation with a state copy that has `proposal_hypotheses` set to an empty list. The judge node is the only node that sees both.
+### Critical Constraint: Calibration Data Integrity
+Override logging must capture both model output and engineer correction before any manual edits, so calibration analysis stays reproducible.
 
 ### Engineer Overrides as Training Signals
-Every time an engineer overrides a hypothesis or debate conclusion in the workspace UI, the override is written to the `engineer_feedback` table with the following fields:
+Every time an engineer overrides a debate conclusion in the workspace UI, the override is written to the `engineer_feedback` table with the following fields:
 
 ```python
 class EngineerFeedback(BaseModel):
     run_id: str
-    capsule_id: str
-    overridden_node: str          # which agent's conclusion was overridden
-    original_output: dict         # the conclusion before override
-    engineer_correction: str      # free-text correction from the engineer
+    cluster_id: str
+    overridden_node: str          # critic_agent, safety_agent, coverage_agent, or report_assembly_node
+    original_output: dict         # recommendation before override
+    engineer_correction: str      # free-text correction from engineer
     created_at: datetime
 ```
 
-This table is the primary source of future fine-tuning and agent improvement signals.
+This table is the primary source of future threshold tuning and agent improvement signals.

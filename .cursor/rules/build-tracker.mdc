@@ -1,0 +1,110 @@
+---
+description: Living build tracker for the Edge Case Discovery Engine. Single source of truth for task status, ownership, blockers, architectural decisions, and known issues. Updated as work progresses.
+globs: "**/*"
+alwaysApply: true
+---
+
+# Edge Case Discovery Engine: Build Tracker
+
+**Last updated:** 2026-03-08
+
+**Build plan (from zero):** [docs/ENGINEER_BUILD_PLAN.md](../../docs/ENGINEER_BUILD_PLAN.md) — aligned with the From-Zero Rebuild Plan: Phase 0 first (venv, Docker pgvector, schema, requirements), then Phases 1–6. Use it to prompt or build step-by-step yourself. **Run guide:** [docs/END_TO_END_TECHNICAL_GUIDE.md](../../docs/END_TO_END_TECHNICAL_GUIDE.md) — how to run each phase, dataset access, module map.
+
+**Note:** Repo was rebuilt from zero; all phase tasks below start as pending until implemented.
+
+---
+
+## Phase 0 — Foundation
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 0.1 | Venv (Python 3.11+), add .venv/ to .gitignore | — | pending | |
+| 0.2 | Copy .env.example to .env; set POSTGRES_* and optionally DATABASE_URL | — | pending | |
+| 0.3 | docker-compose.yml at repo root: db (pgvector/pgvector:pg16), optional pgadmin; omit api/frontend until Phase 6 | — | pending | |
+| 0.4 | kb/db/init/001_scene_schema.sql — uuid-ossp, vector, runs, scene_embeddings, cluster_findings, scene_descriptions, debate_verdicts, gap_reports, engineer_feedback, regression_suite | — | pending | |
+| 0.5 | requirements.txt (and optionally requirements-ec2.txt) for pipeline + API | — | pending | |
+
+---
+
+## Phase 1 — Data Pipeline
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 1.1 | pipeline/ package: ingest.py, embed.py, sanity_check.py; shared run_id and DB connection (asyncpg) | — | pending | |
+| 1.2 | pipeline/ingest.py — enumerate scenes (nuPlan .db or S3), 4 camera paths per keyframe, scene records | — | pending | |
+| 1.3 | pipeline/embed.py — load 4 images, resize 224×224, NIM embed, concat 4096d, write scene_embeddings | — | pending | |
+| 1.4 | Run lifecycle: create runs row on ingest→embed→cluster; scope all reads/writes by run_id | — | pending | |
+| 1.5 | pipeline/sanity_check.py — verify (4096,), token traceability; runnable as python -m pipeline.sanity_check | — | pending | |
+
+---
+
+## Phase 2 — Anomaly Detection
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 2.1 | pipeline/cluster.py — UMAP (50d) + HDBSCAN + GLOSH, flag anomalies, write cluster_findings | — | pending | |
+| 2.2 | pipeline/visualize.py — 2D UMAP scatter + frame grids for GO/NO-GO gate; output to outputs/ | — | pending | |
+| 2.3 | tune() in cluster.py — sweep min_cluster_size, report stats (optional) | — | pending | |
+
+---
+
+## Phase 3 — Description Layer
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 3.1 | pipeline/nim_client.py — async NIM client (embedding, vision, chat); model ids from env | — | pending | |
+| 3.2 | pipeline/describe.py — medoid (+ nearest normal), NIM vision, structured JSON, write scene_descriptions | — | pending | |
+| 3.3 | Spot check — print descriptions for top-5 flagged clusters (manual gate) | human | pending | |
+
+---
+
+## Phase 4 — Multi-Agent Debate
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 4.1 | pipeline/regression_suite.py — 20–30 scenario strings, embed via NIM, store in pgvector | — | pending | |
+| 4.2 | pipeline/agents/critic.py, safety.py, coverage.py — system prompts + NIM; Safety blind to Critic | — | pending | |
+| 4.3 | pipeline/debate.py — Critic ∥ Safety → Coverage per cluster, write debate_verdicts | — | pending | |
+
+---
+
+## Phase 5 — Report Generation
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 5.1 | pipeline/report.py — bucket verdicts, sort, write gap_reports and optional outputs/{run_id}.md .json | — | pending | |
+
+---
+
+## Phase 6 — Backend and Frontend
+
+| # | Task | Owner | Status | Notes / Blockers |
+|---|------|-------|--------|------------------|
+| 6.1 | backend/ — main.py, api/routes.py, models/schemas.py, db/; endpoints per tech_standards §2; Pydantic, async | — | pending | |
+| 6.2 | frontend/app.py — Streamlit: Ingest & Embed, Clusters & Describe, Gap Report; engineer_feedback | — | pending | |
+| 6.3 | Extend docker-compose.yml — api, frontend (Streamlit 8501); deps from requirements-ec2.txt | — | pending | |
+
+---
+
+## Decisions Log
+
+Record architectural choices here as they are made so neither of us has to re-derive them.
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-03-06 | NV-DINOv2 ViT-L via NIM API for scene embedding | Start with ViT-L (1024d/image, 4096d scene). Upgrade to ViT-G (1536d, 6144d) via env var swap if quality insufficient. NIM API keeps access pattern consistent with description and debate agents. |
+| 2026-03-06 | NIM API for embedding (not local GPU) | Eliminates CUDA dependency for embedding step. T4 reserved for optional future local TRT deployment. |
+| 2026-03-06 | 4 cameras per scene: CAM_F0, CAM_L0, CAM_R0, CAM_B0 | Matches nuPlan mini camera layout. Concatenated embedding captures full surround context. |
+| 2026-03-08 | Streamlit for v0 frontend (not Next.js) | Faster to ship for demo. Migrate to Next.js for production if needed. |
+| 2026-03-08 | Regression suite uses NIM text embedding (nv-embedqa-e5-v5) | Scene embeddings (NV-DINOv2) are image-based; regression suite is text-based. Different embedding models, same pgvector storage. |
+| 2026-03-08 | Contrastive scene description (FLAGGED + nearest TYPICAL neighbor) | Send both flagged medoid images and nearest non-anomalous neighbor images to NIM vision so the model can compare-and-contrast and produce a grounded description + contrast_rationale. Aligns description with embedding-space anomaly signal; prompts separate benign vs risk-relevant differences. |
+
+---
+
+## Known Issues
+
+Track bugs, gotchas, and unresolved questions here.
+
+| Date | Issue | Status | Resolution |
+|------|-------|--------|------------|
+| | (none yet) | | |

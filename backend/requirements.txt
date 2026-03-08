@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-asyncpg
-pydantic
-python-dotenv
-alembic
-pytest
-httpx
-openai

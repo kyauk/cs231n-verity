@@ -1,5 +1,0 @@
-.env
-.env.*
-
-.venv/
-core/__pycache__/

@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+asyncpg
+python-dotenv
+pydantic
+httpx
+openai
+umap-learn
+hdbscan
+numpy
+Pillow
+alembic
+psycopg2-binary
+flake8

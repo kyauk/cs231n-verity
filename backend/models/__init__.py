@@ -1,3 +1,0 @@
-"""
-Shared Pydantic models package.
-"""

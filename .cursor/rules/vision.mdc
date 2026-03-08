@@ -1,62 +1,71 @@
 ---
-description: High-level mission, non-technical feature overview, and product alignment for Triage Refinery
+description: High-level mission, non-technical feature overview, and product alignment for the Edge Case Discovery Engine
 globs: "**/*"
 alwaysApply: true
 ---
 
-# Triage Refinery: Project Vision
+# Edge Case Discovery Engine: Project Vision
 
 ## 1. The Mission (The "Macro")
-Triage Refinery is a **debugging copilot** for autonomy and physical-AI engineering teams. Its goal is to eliminate the "setup tax"—the repetitive, cognitively expensive work between failure detection and a productive debugging session.
 
-**The North Star:** Transform messy, fragmented failure traces into structured engineering memory: a reusable, compounding layer of triaged artifacts, similar-case retrieval, and regression knowledge. Think of it as a digital journal and intelligent assistant for debugging complex autonomous systems in non-deterministic environments.
+The Edge Case Discovery Engine is a **coverage-gap intelligence layer** for physical AI and autonomy teams. Its goal is to surface underrepresented driving scenarios from real-world sensor data, reason about whether they are missing from the regression suite, and output prioritized test candidates.
+
+**The North Star:** Turn raw scene corpora into an actionable, ranked list of scenario gaps with clear justifications. The product answers one critical question: what are we still not testing, and why?
 
 ## 2. Overview (How it Works)
-Today, failure evidence arrives as fragmented bundles of logs, metadata, replay links, and notes scattered across issue trackers, observability tools, dashboards, and internal scripts. Triage Refinery sits **on top of** existing tools as a refinement layer—it does not replace them.
+
+Simulation coverage today is mostly reactive: tests are added after known failures. The Edge Case Discovery Engine sits **on top of** existing observability and simulation tools to shift coverage analysis left. It does not replace those systems; it prioritizes what should be tested next.
 
 **The Core Workflow:**
-1. **Ingest:** Accept a raw failure ticket and associated metadata (title, timestamp, scenario ID, subsystem hints, artifact references).
-2. **Refine:** Generate a normalized "Failure Capsule"—a structured debugging artifact with canonical fields, triage summary, and failure taxonomy.
-3. **Connect:** Retrieve semantically similar past incidents, surface why they match, and expose prior resolutions to avoid repeated investigation work.
-4. **Recommend:** Present grounded next-inspection steps tied to specific evidence and retrieved cases—not generic advice.
-5. **Workspace:** Deliver everything in one pre-loaded interface so the engineer arrives at the debugging session with 100% cognitive capacity.
+
+1. **Ingest:** Accept a nuPlan corpus and enumerate keyframe scenes.
+2. **Embed:** Build scene vectors from 4 cameras using NV-DINOv2 via NIM (4096d concatenated embedding).
+3. **Cluster:** Use UMAP + HDBSCAN + GLOSH to detect rare clusters and outliers.
+4. **Describe:** Use **NVIDIA NIM** to generate natural-language scene descriptions.
+5. **Debate:** Run Critic, Safety, and Coverage agents (all **NVIDIA NIM** powered).
+6. **Report:** Assemble ranked, bucketed regression-gap recommendations.
 
 ## 3. Feature Map & Mechanisms
+
 When implementing features, refer to these sub-descriptions:
 
-* **Failure Ingestion & Parsing:** The system accepts structured or unstructured ticket input (JIRA, Slack, etc.) via API or UI. It normalizes raw text and metadata into an internal schema (`source_type`, `source_ref`, `title`, `raw_text`, `event_timestamp`, `agent_id`, `scenario_id`, `artifacts_ref`). Every downstream feature depends on clean ingestion—this is the highest priority.
+* **Scene Ingestion & Embedding:** The system ingests nuPlan scenes and computes NV-DINOv2 ViT-L embeddings (1024d each) via the NVIDIA NIM API for CAM_FRONT, CAM_FRONT_LEFT, CAM_FRONT_RIGHT, and CAM_BACK. The four embeddings are concatenated to a single 4096d scene vector.
 
-* **Failure Capsule:** The canonical, structured representation of a failure. Not just a summary—a normalized data object containing scenario type, failure mode hints, likely subsystem, severity cues, key timestamps, tags, and related evidence references. Stored for future search, clustering, and retrieval.
+* **UMAP + HDBSCAN Clustering:** Scene embeddings are reduced and clustered to identify rare patterns and outliers. Outlier scoring provides a continuous rarity signal for prioritization.
 
-* **Triage Agent with Retrieval (Feature 3 — Core):** The orchestration layer that takes the normalized capsule and coordinates three sub-tasks:
-  * **3.1 Similar-Case Retrieval:** Embed the capsule, query a vector DB of historical capsules, rank by semantic similarity across structured fields and narrative, surface match reasons, and flag low-confidence results explicitly.
-  * **3.2 Root Cause Hypothesis Generation:** Produce 2–3 distinct hypotheses with confidence levels (high / medium / low / uncertain), cite specific supporting evidence, surface what additional signal would shift confidence, and always include an explicit "insufficient evidence" option.
-  * **3.3 Workspace Assembly:** Identify relevant tools (replay viewer, log explorer, simulation runner), pre-configure them to the failure context (timestamp, scenario ID, subsystem, log filters), and present recommended first inspection steps tied to the top hypothesis.
+* **NVIDIA NIM Scene Description:** Flagged scenarios are sent to a vision-capable model via NVIDIA NIM to produce structured description text, scene tags, and complexity cues.
 
-* **Investigation Workspace:** A minimal UI shell that is the engineer's single first-stop. Displays ticket context, the structured failure capsule, similar incidents, relevant resource links, and supports simple engineer notes or feedback on usefulness.
+* **Multi-Agent Debate Layer:** Critic (rarity validity), Safety (risk impact), and Coverage (regression-suite overlap) each produce explicit reasoning, confidence, and recommendation fields.
 
-* **Grounded Recommendation Engine:** Generates next-step suggestions tied to retrieved evidence or prior incidents. Suggests subsystem or owner only when grounded. Avoids generic, unanchored advice.
+* **Ranked Gap Report:** Final output is a prioritized report split into three buckets:
+  * Add to suite immediately
+  * Already covered
+  * Not critical
 
-* **Multi-Agent Debate (V1):** Replaces the single Triage Agent with a three-agent architecture—Proposal Agent (argues for each hypothesis), Critic Agent (retrieves disconfirming evidence *blind* to Proposal's results), and Judge Agent (reconciles both and produces a final verdict). The Critic's retrieval-before-seeing-conclusions constraint prevents motivated retrieval. The full debate transcript is shown in the workspace; every engineer override becomes a training signal.
+* **Feedback Logging:** Engineer overrides are logged as structured training signals for later threshold calibration and model/prompt improvements.
 
 ## 4. User Segments
-* **Primary:** Autonomy/validation engineers investigating simulation or on-road failures; systems/integration engineers debugging multimodal behavior; safety/triage/incident review engineers.
-* **Secondary:** Engineering managers wanting visibility into failure categories and repeated incidents; ML/perception/planning engineers wanting subsystem-relevant similar-case retrieval.
+
+* **Primary:** Autonomy/validation engineers, safety/triage engineers, and simulation/data engineers.
+* **Secondary:** Engineering managers and ML/perception/planning engineers.
 
 ## 5. V0 Scope & Priorities
+
 | Feature | Priority |
 |---|---|
-| Failure Ingestion & Parsing | Must Have |
-| Failure Capsule Generation | Must Have |
-| Triage Agent with Retrieval | Must Have |
-| Investigation Workspace (minimal shell) | Must Have |
-| Grounded Recommendation Engine | Should Have (simplify if time-constrained) |
-| Multi-Agent Debate | Nice to Have (V1) |
+| Scene Ingestion & Embedding | Must Have |
+| UMAP + HDBSCAN Clustering | Must Have |
+| NVIDIA NIM Scene Description | Must Have |
+| Multi-Agent Debate Layer (NIM-powered) | Must Have |
+| Ranked Gap Report | Must Have |
+| Regression Suite Cross-Reference | Should Have |
+| Feedback / Override Logging | Nice to Have |
 
-**V0 success criteria:** An end-to-end prototype that ingests a failure ticket, outputs a structured investigation workspace, retrieves semantically relevant (not just keyword-matched) similar cases, and feels like a useful copilot—not a superficial dashboard.
+**V0 success criteria:** An end-to-end nuPlan pipeline that surfaces semantically coherent rare clusters, identifies at least one meaningful missing regression scenario, and outputs a report that is immediately actionable for engineers.
 
 ## 6. Grounding & Constraints
-* **Primary Source:** Always cross-reference implementation details with `@docs/prd.pdf`.
-* **Differentiator:** Triage Refinery is not observability (seeing data), not simulation/replay (reproducing events), and not a vector database (storing embeddings). It is the **refinement step**—turning raw incident evidence into structured engineering knowledge and recommended action.
-* **Copilot Mode (V0):** The agent must surface its reasoning and uncertainty explicitly at each step. Engineers can read the chain of reasoning, disagree, and override before acting. Never assert false confidence.
-* **Tone:** The system should feel like a "Sierra AI + Datadog baby for autonomy"—a useful debugging copilot, not a superficial dashboard or summary tool.
+
+* **Primary Source:** Always cross-reference implementation details with `@docs/prd_v2.pdf`.
+* **Differentiator:** This product is not observability, not simulation execution, and not generic data labeling. It is the **intelligence layer** between raw logs and regression-suite design.
+* **Reasoning Discipline:** Every recommendation must include confidence and evidence. Avoid black-box scoring with no rationale.
+* **Tone:** Output should feel like an actionable engineering artifact, not a raw anomaly dump.

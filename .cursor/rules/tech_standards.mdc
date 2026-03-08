@@ -1,23 +1,26 @@
 ---
-description: Full technical stack, architecture decisions, and enforced coding conventions for Triage Refinery
+description: Full technical stack, architecture decisions, and enforced coding conventions for the Edge Case Discovery Engine
 globs: "**/*"
 alwaysApply: true
 ---
 
-# Triage Refinery: Technical Reference
+# Edge Case Discovery Engine: Technical Reference
 
 ## 1. Stack Overview
 
 | Layer | Technology |
 |---|---|
+| Scene Embedding | NV-DINOv2 ViT-L via NIM API (1024d/image, 4096d scene vector) |
+| Dimensionality Reduction | UMAP (target ~50d) |
+| Clustering | HDBSCAN + GLOSH |
 | Backend API | Python 3.11+ · FastAPI (async) |
 | Agent Orchestration | LangGraph (multi-agent pipeline) |
-| Primary LLM | NVIDIA NIM — Llama / Mistral family via NVIDIA API |
-| Embeddings | NVIDIA NIM embedding endpoint |
+| Primary LLM/Vision | NVIDIA NIM — OpenAI-compatible API |
 | Vector Store | pgvector extension on PostgreSQL |
-| Primary Database | PostgreSQL (failure capsules, metadata, audit) |
+| Primary Database | PostgreSQL (scene embeddings, cluster metadata, reports) |
 | Frontend | Next.js (TypeScript, App Router) |
 | Containerization | Docker · Docker Compose for local dev |
+| Dataset | nuPlan (nuplan-devkit) |
 | Linter | flake8 |
 | Config | `.env` + `python-dotenv` |
 
@@ -26,33 +29,30 @@ alwaysApply: true
 ## 2. Backend Architecture (FastAPI)
 
 ### Service Structure
-The backend is a single FastAPI application organized into routers by domain. All routes are **async-first** using `async def` and `asyncio`.
+The backend is a single FastAPI application organized into routers by pipeline stage. All routes are **async-first** using `async def` and `asyncio`.
 
 ### API Naming Convention
 All endpoints follow `/<action_type>/<specific_action>`:
 ```
-POST   /ingest/failure_ticket
-POST   /generate/failure_capsule
-POST   /retrieve/similar_cases
-POST   /generate/hypotheses
-POST   /assemble/workspace
-GET    /fetch/failure_capsule/{capsule_id}
-DELETE /delete/failure_capsule/{capsule_id}
+POST   /ingest/log_corpus
+POST   /generate/scene_embeddings
+POST   /cluster/scene_embeddings
+POST   /describe/flagged_scenes
+POST   /debate/coverage_gaps
+GET    /fetch/flagged_clusters/{run_id}
+GET    /assemble/gap_report/{run_id}
 ```
 
 ### Data Contracts
 All request and response bodies are defined as **Pydantic models**. No raw dicts in route signatures.
 
 ```python
-class FailureTicketInput(BaseModel):
-    source_type: str           # e.g. "jira", "slack"
-    source_ref: str            # ticket ID or URL
-    title: str
-    raw_text: str
-    event_timestamp: datetime
-    agent_id: Optional[str]
-    scenario_id: Optional[str]
-    artifacts_ref: Optional[list[str]]
+class LogCorpusInput(BaseModel):
+    dataset_name: str
+    corpus_ref: str
+    split_name: Optional[str]
+    max_scenes: Optional[int]
+    include_tokens: Optional[list[str]]
 ```
 
 Data passed between services uses **JSON** wherever possible. CSV is an acceptable fallback for bulk exports only.
@@ -61,32 +61,33 @@ Data passed between services uses **JSON** wherever possible. CSV is an acceptab
 
 ## 3. Agent Orchestration (LangGraph)
 
-The triage pipeline is implemented as a **LangGraph state graph**, where each node is a specialized reasoning agent. This directly supports the PRD's V0 copilot model and the V1 multi-agent debate architecture.
+The discovery pipeline is implemented as a **LangGraph state graph**, where each node is a specialized processing or reasoning step. This directly supports PRD v2's V0 coverage-gap workflow and V1 extension roadmap.
 
-### V0 Graph (Single Agent, Copilot Mode)
+### V0 Graph (Coverage Discovery)
 ```
-ingest_node → capsule_generation_node → retrieval_node → hypothesis_node → workspace_assembly_node
+ingest_node → embedding_node → clustering_node → description_node → debate_node → report_assembly_node
 ```
 
 ### V1 Graph (Multi-Agent Debate)
 ```
-ingest_node → capsule_generation_node → [proposal_agent || critic_agent] → judge_agent → workspace_assembly_node
+ingest_node → embedding_node → clustering_node → description_node → [critic_agent → safety_agent → coverage_agent] → report_assembly_node
 ```
-- The `critic_agent` node performs its retrieval **before** receiving the `proposal_agent`'s conclusions. Enforce this via separate subgraph invocations with isolated state.
+- The `safety_agent` evaluates risk blind to critic conclusions.
+- The `coverage_agent` cross-references against regression-suite context.
 - Every engineer override collected in the workspace UI is logged as a structured training signal.
 
 ### Agent Conventions
 - Each agent node is a standalone async Python function.
 - Agents must surface uncertainty explicitly — never assert a conclusion without a confidence level and cited evidence.
-- Use `INSUFFICIENT_EVIDENCE` as a valid hypothesis state rather than forcing a low-confidence answer.
+- Use explicit uncertain states (`INSUFFICIENT_EVIDENCE`, `ARTIFACT_RISK`) rather than forcing confident outputs.
 
 ---
 
 ## 4. LLM Integration (NVIDIA NIM)
 
-- All LLM calls go through the NVIDIA NIM API using the OpenAI-compatible client (`openai.AsyncOpenAI` pointed at the NVIDIA base URL).
+- All scene-description and debate calls go through the NVIDIA NIM API using the OpenAI-compatible client (`openai.AsyncOpenAI` pointed at the NVIDIA base URL).
 - Credentials are loaded from `.env` as `NVIDIA_API_KEY` and `NVIDIA_BASE_URL`.
-- Model selection (e.g. `meta/llama-3.1-70b-instruct`) is set via env var `NVIDIA_MODEL_ID` so it can be swapped without code changes.
+- Model selection (e.g. `meta/llama-3.1-70b-instruct`) is set via env var `NVIDIA_MODEL_ID`; optional vision model selection can use `NVIDIA_VISION_MODEL_ID`.
 - All calls are **async**. Never use blocking `openai.ChatCompletion` patterns.
 
 ```python
@@ -101,16 +102,18 @@ client = AsyncOpenAI(
 ## 5. Database & Vector Store (PostgreSQL + pgvector)
 
 - A single PostgreSQL instance runs both relational tables and the `pgvector` extension — no separate vector service.
-- The `failure_capsules` table holds normalized capsule fields plus an `embedding vector(1536)` column.
+- The `scene_embeddings` table holds scene vectors as `embedding vector(4096)` with token traceability.
 - Use `asyncpg` as the async PostgreSQL driver. All DB calls are async.
 - Similarity search uses `<=>` (cosine distance) operator from pgvector.
 - Migrations are managed via **Alembic**.
 
 ### Key Tables
 ```sql
-failure_capsules     -- normalized capsule + pgvector embedding
-raw_tickets          -- original ingested input, immutable
-similar_case_links   -- retrieval results cached per capsule
+scene_embeddings     -- token-level scene vectors and metadata
+cluster_findings     -- cluster_id, anomaly_type, glosh_score, and rarity metadata
+scene_descriptions   -- NIM-generated scene descriptions for flagged findings
+debate_verdicts      -- critic/safety/coverage outputs with confidence and rationale
+gap_reports          -- ranked output buckets per run
 engineer_feedback    -- override and usefulness signals from workspace UI
 ```
 
@@ -121,7 +124,7 @@ engineer_feedback    -- override and usefulness signals from workspace UI
 - **TypeScript** throughout. No untyped `any` in component props or API response shapes.
 - **App Router** (not Pages Router).
 - API calls from the frontend hit the FastAPI backend directly via `fetch` with typed response interfaces.
-- The Investigation Workspace is a single-page view with distinct panels: ticket context + triage summary, structured failure capsule, similar incidents, resource links, and an engineer notes/feedback input.
+- The Discovery Workspace is a single-page view with panels for corpus context, flagged clusters, scene descriptions, debate transcript, ranked report buckets, and engineer feedback input.
 - Environment variable for backend URL: `NEXT_PUBLIC_API_URL` in `.env.local`.
 
 ---
@@ -226,13 +229,18 @@ All non-trivial logic blocks must have inline comments explaining *why*, not jus
 NVIDIA_API_KEY=
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 NVIDIA_MODEL_ID=meta/llama-3.1-70b-instruct
-NVIDIA_EMBEDDING_MODEL_ID=nvidia/nv-embedqa-e5-v5
+NVIDIA_VISION_MODEL_ID=meta/llama-3.2-90b-vision-instruct
+NVIDIA_EMBEDDING_MODEL_ID=nvidia/nv-dinov2
 
-# OpenAI (fallback / auxiliary)
-OPENAI_API_KEY=
+# nuPlan / discovery pipeline
+NUPLAN_DATA_ROOT=
+UMAP_RANDOM_SEED=42
+UMAP_N_COMPONENTS=50
+HDBSCAN_MIN_CLUSTER_SIZE=
+GLOSH_THRESHOLD=0.7
 
 # PostgreSQL
-DATABASE_URL=postgresql+asyncpg://user:password@db:5432/triage_refinery
+DATABASE_URL=postgresql+asyncpg://user:password@db:5432/edge_case_discovery
 
 # Next.js
 NEXT_PUBLIC_API_URL=http://localhost:8000

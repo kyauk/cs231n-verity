@@ -1,13 +1,14 @@
 ---
-description: API contracts and interface boundaries between all major modules in Triage Refinery. When writing code that crosses a module boundary, always check this file first.
+description: API contracts and interface boundaries between all major modules in the Edge Case Discovery Engine. When writing code that crosses a module boundary, always check this file first.
 alwaysApply: false
 ---
-# Triage Refinery: Interfaces & API Contracts
+# Edge Case Discovery Engine: Interfaces & API Contracts
 
 ## What This File Is For
+
 Any time two modules talk to each other — the frontend calling the backend, a FastAPI route kicking off the LangGraph pipeline, an agent node reading from the DB — the shape of the data they exchange must match exactly. This file defines those shapes and rules. If you are writing code that **produces or consumes data at a module boundary**, check the relevant contract here before writing a single field name.
 
-A contract violation (e.g. the backend returns `capsule_id` but the frontend expects `id`) will cause a silent runtime failure that is hard to debug. Pydantic is your enforcement mechanism — use it at every boundary.
+A contract violation (e.g. the backend returns `cluster_id` but the frontend expects `id`) will cause a silent runtime failure that is hard to debug. Pydantic is your enforcement mechanism — use it at every boundary.
 
 ---
 
@@ -32,6 +33,7 @@ Each boundary has a defined contract below. **Never pass raw dicts across a boun
 ## 2. Boundary 1 — Frontend (Next.js) ↔ Backend (FastAPI)
 
 ### Rules
+
 - All request and response bodies are JSON.
 - TypeScript interfaces on the frontend must mirror the Pydantic models on the backend field-for-field.
 - If a backend schema changes, the corresponding TypeScript interface in `/frontend/types/` must be updated in the same PR.
@@ -39,117 +41,110 @@ Each boundary has a defined contract below. **Never pass raw dicts across a boun
 
 ### Core Contracts
 
-**Ingest a failure ticket**
+**Ingest a log corpus**
 ```
-POST /ingest/failure_ticket
+POST /ingest/log_corpus
 
 Request:
 {
-  "sourceType": "jira" | "slack" | "manual",
-  "sourceRef": string,
-  "title": string,
-  "rawText": string,
-  "eventTimestamp": string (ISO 8601),
-  "agentId": string | null,
-  "scenarioId": string | null,
-  "artifactsRef": string[] | null
+  "datasetName": "nuplan-mini" | "nuplan-trainval" | string,
+  "corpusRef": string,
+  "splitName": string | null,
+  "maxScenes": number | null,
+  "includeTokens": string[] | null
 }
 
 Response:
 {
-  "ticketId": string (UUID),
+  "runId": string (UUID),
+  "corpusId": string (UUID),
   "status": "received" | "processing" | "failed",
   "message": string
 }
 ```
 
-**Get a failure capsule**
+**Get flagged clusters**
 ```
-GET /fetch/failure_capsule/{capsule_id}
+GET /fetch/flagged_clusters/{run_id}
 
 Response:
 {
-  "capsuleId": string (UUID),
-  "ticketId": string (UUID),
-  "triageSummary": string,
-  "scenarioType": string | null,
-  "failureModeHints": string[],
-  "likelySubsystem": string | null,
-  "severityCue": "critical" | "high" | "medium" | "low" | "unknown",
-  "keyTimestamp": string (ISO 8601) | null,
-  "tags": string[],
-  "createdAt": string (ISO 8601)
-}
-```
-
-**Get similar cases**
-```
-POST /retrieve/similar_cases
-
-Request:
-{
-  "capsuleId": string (UUID),
-  "topK": number (default: 5)
-}
-
-Response:
-{
-  "capsuleId": string (UUID),
+  "runId": string (UUID),
   "results": [
     {
-      "similarCapsuleId": string (UUID),
-      "similarityScore": number (0.0–1.0),
-      "matchReason": string,
-      "triageSummary": string,
-      "resolution": string | null,
-      "confidence": "high" | "medium" | "low"
+      "clusterId": string,
+      "anomalyType": "noise_point" | "small_cluster" | "high_glosh",
+      "gloshScore": number,
+      "representativeTokens": string[],
+      "sampleCount": number
     }
   ]
 }
 ```
 
-**Get hypotheses**
+**Get scene descriptions**
 ```
-POST /generate/hypotheses
+POST /describe/flagged_scenes
 
 Request:
 {
-  "capsuleId": string (UUID)
+  "runId": string (UUID),
+  "clusterIds": string[]
 }
 
 Response:
 {
-  "capsuleId": string (UUID),
-  "hypotheses": [
+  "runId": string (UUID),
+  "results": [
     {
-      "hypothesisId": string (UUID),
+      "clusterId": string,
       "description": string,
-      "confidence": "high" | "medium" | "low" | "uncertain" | "insufficient_evidence",
-      "supportingEvidence": string[],
-      "additionalSignalNeeded": string | null
+      "sceneType": string | null,
+      "complexityCue": "low" | "medium" | "high" | "uncertain",
+      "representativeFrameRefs": string[]
     }
   ]
 }
 ```
 
-**Get assembled workspace**
+**Run debate**
 ```
-GET /assemble/workspace/{capsule_id}
+POST /debate/coverage_gaps
+
+Request:
+{
+  "runId": string (UUID),
+  "clusterIds": string[],
+  "regressionSuiteRef": string | null
+}
 
 Response:
 {
-  "capsuleId": string (UUID),
-  "capsule": FailureCapsule,
-  "similarCases": SimilarCase[],
-  "hypotheses": Hypothesis[],
-  "recommendedSteps": string[],
-  "relevantResources": [
+  "runId": string (UUID),
+  "verdicts": [
     {
-      "label": string,
-      "url": string,
-      "resourceType": "replay" | "log" | "doc" | "simulation" | "other"
+      "clusterId": string,
+      "isCritical": boolean,
+      "inSuite": boolean,
+      "adjacentTest": string | null,
+      "recommendation": "add_immediately" | "already_covered" | "not_critical",
+      "priorityScore": number (0.0–1.0),
+      "debateTranscript": string
     }
   ]
+}
+```
+
+**Get assembled gap report**
+```
+GET /assemble/gap_report/{run_id}
+
+Response:
+{
+  "runId": string (UUID),
+  "addImmediately": GapCandidate[],
+  "alreadyCovered": GapCandidate[],
+  "notCritical": GapCandidate[]
 }
 ```
 
@@ -158,6 +153,7 @@ Response:
 ## 3. Boundary 2 — FastAPI Routes ↔ LangGraph Pipeline
 
 ### Rules
+
 - FastAPI route handlers must never contain business logic. Their only jobs are: validate the incoming request, call the appropriate pipeline entry function, and return the response.
 - The pipeline is invoked by passing a single typed `PipelineInput` Pydantic model. The route never passes individual keyword arguments.
 - The pipeline returns a single typed `PipelineOutput` Pydantic model. The route maps this to the HTTP response schema.
@@ -168,22 +164,20 @@ Response:
 # /backend/models/pipeline_io.py — imported by both routes and agents
 
 class PipelineInput(BaseModel):
-    ticket_id: str
-    source_type: str
-    source_ref: str
-    title: str
-    raw_text: str
-    event_timestamp: datetime
-    agent_id: Optional[str]
-    scenario_id: Optional[str]
-    artifacts_ref: Optional[list[str]]
+    run_id: str
+    corpus_id: str
+    dataset_name: str
+    corpus_ref: str
+    split_name: Optional[str]
+    max_scenes: Optional[int]
+    include_tokens: Optional[list[str]]
 
 class PipelineOutput(BaseModel):
-    capsule_id: str
-    triage_summary: str
-    hypotheses: list[HypothesisResult]
-    similar_cases: list[SimilarCaseResult]
-    recommended_steps: list[str]
+    run_id: str
+    flagged_clusters: list[ClusterFinding]
+    scene_descriptions: list[SceneDescription]
+    debate_verdicts: list[DebateVerdict]
+    gap_report_buckets: GapReportBuckets
     pipeline_status: Literal["complete", "partial", "failed"]
     error_message: Optional[str]
 ```
@@ -193,46 +187,65 @@ class PipelineOutput(BaseModel):
 ## 4. Boundary 3 — Agent Nodes ↔ DB / Vector Store Layer
 
 ### Rules
+
 - Agent nodes never write raw SQL. All DB access goes through repository functions in `/backend/db/`.
 - Repository functions always accept and return **Pydantic models**, not raw dicts or ORM objects.
-- Vector similarity queries always return a `SimilarCaseResult` list, never raw embedding arrays.
+- Repository functions for discovery stages always return typed models (not raw dicts), including findings, descriptions, and verdicts.
 
 ### Contract
 
 ```python
-# /backend/db/capsule_repo.py
+# /backend/db/discovery_repo.py
 
-async def save_capsule(capsule: FailureCapsuleRecord) -> str:
-    '''Returns the saved capsule_id (UUID string).'''
+async def save_scene_embeddings(rows: list[SceneEmbeddingRecord]) -> int:
+    '''Returns inserted row count for scene embeddings.'''
 
-async def get_capsule(capsule_id: str) -> FailureCapsuleRecord | None:
-    '''Returns None if not found — callers must handle this explicitly.'''
+async def save_cluster_findings(run_id: str, findings: list[ClusterFindingRecord]) -> int:
+    '''Returns inserted row count for cluster findings.'''
 
-async def cosine_search(embedding: list[float], top_k: int) -> list[SimilarCaseResult]:
-    '''Returns ranked list of similar capsules via pgvector <=> operator.'''
+async def save_scene_descriptions(run_id: str, rows: list[SceneDescriptionRecord]) -> int:
+    '''Returns inserted row count for scene descriptions.'''
+
+async def save_debate_verdicts(run_id: str, rows: list[DebateVerdictRecord]) -> int:
+    '''Returns inserted row count for debate verdicts.'''
+
+async def fetch_gap_report(run_id: str) -> GapReportBuckets | None:
+    '''Returns assembled report buckets for API response.'''
 
 # /backend/models/db_records.py
 
-class FailureCapsuleRecord(BaseModel):
-    capsule_id: str
-    ticket_id: str
-    triage_summary: str
-    scenario_type: Optional[str]
-    failure_mode_hints: list[str]
-    likely_subsystem: Optional[str]
-    severity_cue: str
-    key_timestamp: Optional[datetime]
-    tags: list[str]
-    embedding: list[float]   # 1536-dim vector from NVIDIA embedding model
+class SceneEmbeddingRecord(BaseModel):
+    row_id: str
+    run_id: str
+    token: str
+    timestamp: int
+    scene_name: str
+    embedding: list[float]   # 4096-dim vector (4 x 1024d NV-DINOv2 ViT-L)
     created_at: datetime
 
-class SimilarCaseResult(BaseModel):
-    similar_capsule_id: str
-    similarity_score: float   # 0.0–1.0, higher = more similar
-    match_reason: str
-    triage_summary: str
-    resolution: Optional[str]
-    confidence: Literal["high", "medium", "low"]
+class ClusterFindingRecord(BaseModel):
+    run_id: str
+    cluster_id: str
+    anomaly_type: Literal["noise_point", "small_cluster", "high_glosh"]
+    glosh_score: float
+    representative_tokens: list[str]
+
+class SceneDescriptionRecord(BaseModel):
+    run_id: str
+    cluster_id: str
+    description: str
+    scene_type: Optional[str]
+    complexity_cue: Literal["low", "medium", "high", "uncertain"]
+
+class DebateVerdictRecord(BaseModel):
+    run_id: str
+    cluster_id: str
+    is_critical: bool
+    in_suite: bool
+    adjacent_test: Optional[str]
+    recommendation: Literal["add_immediately", "already_covered", "not_critical"]
+    priority_score: float
+    debate_transcript: str
 ```
 
 ---
@@ -240,40 +253,55 @@ class SimilarCaseResult(BaseModel):
 ## 5. Boundary 4 — LLM Service ↔ Agent Nodes
 
 ### Rules
+
 - All LLM calls are centralized in `/backend/services/llm_client.py`. Agent nodes never instantiate their own LLM clients.
 - Every LLM call is wrapped in a typed function that returns a Pydantic model — never a raw string.
 - Prompt templates live in `/backend/services/prompts/` as `.py` files, not hardcoded inline.
+- All scene-description and debate model calls are powered by NVIDIA NIM.
 
 ### Contract
 
 ```python
 # /backend/services/llm_client.py
 
-async def generate_triage_summary(raw_text: str, metadata: dict) -> TriageSummaryResult:
-    '''Calls NVIDIA NIM to produce a structured triage summary from raw ticket text.'''
+async def generate_scene_description(image_refs: list[str], metadata: dict) -> SceneDescriptionResult:
+    '''Calls NVIDIA NIM to produce structured scene descriptions.'''
 
-async def generate_hypotheses(capsule: FailureCapsuleRecord, similar_cases: list[SimilarCaseResult]) -> list[HypothesisResult]:
-    '''Calls NVIDIA NIM to produce 2–3 root cause hypotheses with confidence levels.'''
+async def run_critic_agent(finding: ClusterFindingRecord, description: SceneDescriptionResult) -> CriticResult:
+    '''Calls NVIDIA NIM to assess artifact risk and rarity validity.'''
 
-async def generate_embedding(text: str) -> list[float]:
-    '''Calls NVIDIA NIM embedding endpoint. Returns 1536-dim float vector.'''
+async def run_safety_agent(description: SceneDescriptionResult) -> SafetyResult:
+    '''Calls NVIDIA NIM to assess safety consequence of missing this scenario.'''
+
+async def run_coverage_agent(description: SceneDescriptionResult, suite_context: dict) -> CoverageResult:
+    '''Calls NVIDIA NIM to assess suite coverage and adjacency.'''
 
 # /backend/models/llm_outputs.py
 
-class TriageSummaryResult(BaseModel):
-    summary: str
-    scenario_type: Optional[str]
-    failure_mode_hints: list[str]
-    likely_subsystem: Optional[str]
-    severity_cue: Literal["critical", "high", "medium", "low", "unknown"]
-    tags: list[str]
-
-class HypothesisResult(BaseModel):
-    hypothesis_id: str
+class SceneDescriptionResult(BaseModel):
+    cluster_id: str
     description: str
-    confidence: Literal["high", "medium", "low", "uncertain", "insufficient_evidence"]
-    supporting_evidence: list[str]
-    additional_signal_needed: Optional[str]
+    scene_type: Optional[str]
+    complexity_cue: Literal["low", "medium", "high", "uncertain"]
+
+class CriticResult(BaseModel):
+    cluster_id: str
+    is_meaningful_rarity: bool
+    confidence: Literal["high", "medium", "low"]
+    evidence: list[str]
+
+class SafetyResult(BaseModel):
+    cluster_id: str
+    is_critical: bool
+    confidence: Literal["high", "medium", "low", "uncertain"]
+    potential_failure_modes: list[str]
+
+class CoverageResult(BaseModel):
+    cluster_id: str
+    in_suite: bool
+    adjacent_test: Optional[str]
+    recommendation: Literal["add_immediately", "already_covered", "not_critical"]
+    priority_score: float
 ```
 
 ---
