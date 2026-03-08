@@ -27,5 +27,22 @@ services:
     depends_on:
       - db
 
+  cosmos-embed1:
+    image: nvcr.io/nim/nvidia/cosmos-embed1:1.0.0
+    container_name: discovery-cosmos-embed1
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY}
+    ports:
+      - "8080:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+
 volumes:
   pgdata:
