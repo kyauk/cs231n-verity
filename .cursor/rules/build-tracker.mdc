@@ -107,4 +107,4 @@ Track bugs, gotchas, and unresolved questions here.
 
 | Date | Issue | Status | Resolution |
 |------|-------|--------|------------|
-| | (none yet) | | |
+| 2026-03-08 | cosmos-embed1 NIM: "Authentication Error" when downloading manifest | resolved | **Root cause:** The shell was not loading `.env`, so `NGC_API_KEY` was empty when Docker Compose substituted `${NGC_API_KEY}`. **Fix:** Force the shell to load `.env` before running compose: `export $(grep -v '^#' .env | xargs)`. Then run `docker compose --profile gpu up -d cosmos-embed1`. |

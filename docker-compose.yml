@@ -30,6 +30,8 @@ services:
   cosmos-embed1:
     image: nvcr.io/nim/nvidia/cosmos-embed1:1.0.0
     container_name: discovery-cosmos-embed1
+    env_file:
+      - .env
     environment:
       NGC_API_KEY: ${NGC_API_KEY}
     ports:

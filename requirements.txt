@@ -8,6 +8,8 @@ openai
 umap-learn
 hdbscan
 numpy
+matplotlib
+scikit-learn
 Pillow
 alembic
 psycopg2-binary
@@ -15,3 +17,4 @@ flake8
 opencv-python-headless
 boto3
 requests
+plotly

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 import requests
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 from pipeline.models.scene_window import (
@@ -205,7 +206,19 @@ def materialize_window_frames(
                 tmp_dir, channel, f"{rel_idx:06d}{ext}",
             )
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            s3_client.download_file(bucket, key, local_path)
+            try:
+                s3_client.download_file(bucket, key, local_path)
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "404":
+                    raise
+                # Fallback: layout BUCKET/<prefix>/<log_id>/<CAM_*>/<filename>
+                # e.g. nuplan-v1.1/sensor_blobs/camera_0/nuplan-v1.1_mini_camera_0/<file_name>/CAM_B0/...
+                prefix_before_log = os.getenv(
+                    "S3_NUPLAN_EMBED_CAMERA_PREFIX",
+                    "nuplan-v1.1/sensor_blobs/camera_0/nuplan-v1.1_mini_camera_0",
+                )
+                alt_key = f"{prefix_before_log.rstrip('/')}/{scene.log_id}/{channel}/{os.path.basename(key)}"
+                s3_client.download_file(bucket, alt_key, local_path)
             frames[channel].append(local_path)
     return frames
 
@@ -232,8 +245,10 @@ def assemble_clip(
     Called by: encode_window_cosmos().
     Calls: cv2.VideoWriter(), cv2.imread(), cv2.resize().
     '''
+    # Use mp4v (MPEG-4); avc1/H.264 can fail on headless/CI (h264_v4l2m2m device)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(output_path, fourcc, fps, size)
+    frames_written = 0
     try:
         for path in frame_paths:
             img = cv2.imread(path)
@@ -241,14 +256,82 @@ def assemble_clip(
                 continue
             img = cv2.resize(img, size)
             writer.write(img)
+            frames_written += 1
+        if frames_written == 0 and frame_paths:
+            # Avoid 0-frame clip (causes Cosmos "All inputs failed")
+            black = np.zeros((size[1], size[0], 3), dtype=np.uint8)
+            writer.write(black)
+            frames_written = 1
     finally:
         writer.release()
     return output_path
 
 
+def _reencode_mp4_to_h264_if_available(clip_path: str) -> str:
+    '''
+    Purpose: Re-encode MP4 to H.264 with ffmpeg so Cosmos receives
+        recommended format; return path to use (H.264 file or original).
+    Parameters:
+        clip_path (str): Path to assembled mp4v clip.
+    Returns:
+        str: Path to clip to send (H.264 temp file or clip_path).
+    Called by: encode_window_cosmos().
+    Calls: subprocess.run(), shutil.copy().
+    '''
+    import subprocess
+    out_path = clip_path + ".h264.mp4"
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", clip_path,
+                "-c:v", "libx264", "-preset", "fast",
+                "-f", "mp4", "-movflags", "+faststart",
+                out_path,
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode == 0 and os.path.isfile(out_path):
+            return out_path
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return clip_path
+
+
 # -------------------------------------------------------------------
-# Cosmos Embed1 client
+# Cosmos Embed1 client (NVIDIA recommended payload format)
 # -------------------------------------------------------------------
+
+COSMOS_REQUEST_TYPE_QUERY = "query"
+COSMOS_ENCODING_FORMAT = "float"
+COSMOS_MODEL = "nvidia/cosmos-embed1"
+
+
+def build_cosmos_embeddings_payload(
+    input_items: list[str],
+    request_type: str = COSMOS_REQUEST_TYPE_QUERY,
+) -> dict:
+    '''
+    Purpose: Build the Cosmos Embed1 /v1/embeddings request body in
+        NVIDIA-recommended structure (input, request_type, encoding_format,
+        model).
+    Parameters:
+        input_items (list[str]): List of input strings, e.g. one
+            "data:video/mp4;base64,..." for query, or multiple
+            "data:video/mp4;presigned_url,<url>" for bulk_video.
+        request_type (str): "query" or "bulk_video". Default query.
+    Returns:
+        dict: Payload for POST /v1/embeddings.
+    Called by: cosmos_embed_clip().
+    Calls: None.
+    '''
+    return {
+        "input": input_items,
+        "request_type": request_type,
+        "encoding_format": COSMOS_ENCODING_FORMAT,
+        "model": COSMOS_MODEL,
+    }
+
 
 def cosmos_embed_clip(
     clip_path: str,
@@ -263,18 +346,16 @@ def cosmos_embed_clip(
     Returns:
         np.ndarray: 256-dimensional float32 embedding.
     Called by: encode_window_cosmos().
-    Calls: requests.post().
+    Calls: build_cosmos_embeddings_payload(), requests.post().
     '''
     with open(clip_path, "rb") as f:
         video_bytes = f.read()
     video_b64 = base64.b64encode(video_bytes).decode("utf-8")
-
-    payload = {
-        "input": [f"data:video/mp4;base64,{video_b64}"],
-        "request_type": "query",
-        "encoding_format": "float",
-        "model": "nvidia/cosmos-embed1",
-    }
+    input_item = f"data:video/mp4;base64,{video_b64}"
+    payload = build_cosmos_embeddings_payload(
+        [input_item],
+        request_type=COSMOS_REQUEST_TYPE_QUERY,
+    )
     url = f"{cosmos_url.rstrip('/')}/v1/embeddings"
     resp = requests.post(url, json=payload, timeout=120)
     if resp.status_code != 200:
@@ -358,7 +439,8 @@ def encode_window_cosmos(
             assemble_clip(
                 frames, clip_path, fps=clip_fps, size=frame_size,
             )
-            emb = cosmos_embed_clip(clip_path, cosmos_url)
+            send_path = _reencode_mp4_to_h264_if_available(clip_path)
+            emb = cosmos_embed_clip(send_path, cosmos_url)
             camera_embeddings.append(emb)
 
         concatenated = np.concatenate(camera_embeddings)
