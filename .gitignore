@@ -4,7 +4,7 @@ __pycache__/
 .env
 bevfusion/
 docs/
-.cursor/
+.cursor/rules
 outputs/
 pipeline/__pycache__/
 pipeline/models/__pycache__/
