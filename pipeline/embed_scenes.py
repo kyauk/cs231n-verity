@@ -3,6 +3,12 @@
 Supports temporal windowing and multiple encoder backends:
   - fake: deterministic placeholder for pipeline validation
   - cosmos_embed1: NVIDIA Cosmos Embed1 NIM for video embeddings
+
+Usage:
+  python -m pipeline.embed_scenes \\
+      --input-jsonl outputs/scene_windows.jsonl \\
+      --output-jsonl outputs/window_embeddings.jsonl \\
+      --encoder cosmos_embed1
 """
 
 from __future__ import annotations
@@ -12,8 +18,11 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import tempfile
+import time
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -29,6 +38,121 @@ from pipeline.models.scene_window import (
     WindowEmbeddingRecord,
     WindowSpec,
 )
+
+
+# -------------------------------------------------------------------
+# Tmux progress bar
+# -------------------------------------------------------------------
+
+def _in_tmux() -> bool:
+    '''
+    Purpose: Detect whether the process is running inside a tmux session.
+    Parameters: None.
+    Returns: bool — True if TMUX env var is set and tmux binary exists.
+    Called by: TmuxProgress.__init__().
+    Calls: shutil.which().
+    '''
+    return bool(os.environ.get("TMUX")) and shutil.which("tmux") is not None
+
+
+class TmuxProgress:
+    '''Lightweight tmux status-right progress bar for long-running jobs.
+
+    Updates the tmux status bar with a visual progress indicator.
+    Gracefully no-ops when not running inside tmux.
+    '''
+
+    BAR_WIDTH = 20
+
+    def __init__(self, total: int, label: str = "Embedding"):
+        '''
+        Purpose: Initialize progress tracker and save original tmux
+            status-right so it can be restored on cleanup.
+        Parameters:
+            total (int): Total number of work items.
+            label (str): Short prefix label shown in the bar.
+        Returns: None.
+        Called by: main().
+        Calls: _in_tmux(), subprocess.run().
+        '''
+        self.total = max(total, 1)
+        self.label = label
+        self.current = 0
+        self.active = _in_tmux()
+        self._original_status: str | None = None
+        self._start_time = time.monotonic()
+
+        if self.active:
+            try:
+                result = subprocess.run(
+                    ["tmux", "show-option", "-gv", "status-right"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                self._original_status = result.stdout.strip()
+                subprocess.run(
+                    ["tmux", "set", "-g", "status-interval", "1"],
+                    capture_output=True, timeout=5,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                self.active = False
+
+    def update(self, current: int | None = None) -> None:
+        '''
+        Purpose: Push a progress update to the tmux status bar.
+        Parameters:
+            current (int | None): Absolute progress count. If None,
+                increments by 1.
+        Returns: None.
+        Called by: main() inner loop.
+        Calls: subprocess.run().
+        '''
+        if not self.active:
+            return
+        self.current = current if current is not None else self.current + 1
+        pct = self.current / self.total
+        filled = int(self.BAR_WIDTH * pct)
+        bar = "█" * filled + "░" * (self.BAR_WIDTH - filled)
+
+        elapsed = time.monotonic() - self._start_time
+        if self.current > 0:
+            eta_s = (elapsed / self.current) * (self.total - self.current)
+            eta_str = f"ETA {int(eta_s // 60)}m{int(eta_s % 60):02d}s"
+        else:
+            eta_str = "ETA --"
+
+        status = (
+            f" {self.label}: {self.current}/{self.total} "
+            f"({pct:.0%}) [{bar}] {eta_str} "
+        )
+        try:
+            subprocess.run(
+                ["tmux", "set", "-g", "status-right", status],
+                capture_output=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            self.active = False
+
+    def finish(self) -> None:
+        '''
+        Purpose: Restore the original tmux status-right value.
+        Parameters: None.
+        Returns: None.
+        Called by: main() on completion.
+        Calls: subprocess.run().
+        '''
+        if not self.active:
+            return
+        elapsed = time.monotonic() - self._start_time
+        restore = self._original_status or ""
+        try:
+            subprocess.run(
+                ["tmux", "set", "-g", "status-right", restore],
+                capture_output=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"Total embedding time: {mins}m{secs:02d}s")
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,6 +189,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--max-windows-per-scene", type=int, default=0,
         help="Cap windows per scene. 0 = unlimited.",
+    )
+    p.add_argument(
+        "--resume-from",
+        default=None,
+        help="Path to existing embedding JSONL; skip any window_id already in it.",
+    )
+    p.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="Rotate to a new output file every N scenes (e.g. 50). 0 = single file.",
     )
 
     # Cosmos Embed1 parameters
@@ -104,6 +239,49 @@ def iter_scene_windows(path: str) -> Iterable[SceneWindow]:
             if not line.strip():
                 continue
             yield SceneWindow.model_validate(json.loads(line))
+
+
+def load_resume_window_ids(path: str) -> set[str]:
+    '''
+    Purpose: Load all window_id values from an embedding JSONL for resume.
+    Parameters:
+        path (str): Path to existing embedding JSONL.
+    Returns:
+        set[str]: Window IDs that should be skipped when resuming.
+    Called by: main().
+    Calls: open(), json.loads().
+    '''
+    out: set[str] = set()
+    if not path or not os.path.isfile(path):
+        return out
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+                wid = row.get("window_id")
+                if wid is not None:
+                    out.add(str(wid))
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return out
+
+
+def output_stem_for_checkpoints(output_jsonl: str) -> str:
+    '''
+    Purpose: Get the stem for checkpoint filenames (e.g. embedding_001.jsonl).
+    Parameters:
+        output_jsonl (str): Base output path (e.g. outputs/embedding.jsonl).
+    Returns:
+        str: Stem without .jsonl (e.g. outputs/embedding).
+    Called by: main().
+    Calls: os.path.splitext(), os.path.join().
+    '''
+    base = os.path.basename(output_jsonl)
+    stem_name = base.replace(".jsonl", "").rstrip("_")
+    dirname = os.path.dirname(output_jsonl)
+    return os.path.join(dirname, stem_name) if dirname else stem_name
 
 
 # -------------------------------------------------------------------
@@ -167,6 +345,47 @@ def slice_windows(
 # Frame materialization (S3 download)
 # -------------------------------------------------------------------
 
+def get_embed_camera_prefix_list() -> list[str]:
+    '''
+    Purpose: Return list of S3 path prefixes (no bucket) to try when
+        resolving camera frame keys on 404. Supports multiple prefixes
+        and optional {a-b} range expansion.
+    Parameters: None.
+    Returns:
+        list[str]: Ordered list of prefixes to try (e.g. camera_2 .. camera_8).
+    Called by: materialize_window_frames().
+    Calls: os.getenv(), re.search().
+    '''
+    def expand_range(s: str) -> list[str]:
+        # Replace single {a-b} with a, a+1, ..., b to produce multiple prefixes.
+        match = re.search(r"\{(\d+)-(\d+)\}", s)
+        if not match:
+            return [s.strip()] if s.strip() else []
+        lo, hi = int(match.group(1)), int(match.group(2))
+        if lo > hi:
+            return [s.strip()] if s.strip() else []
+        return [
+            (s[: match.start()] + str(i) + s[match.end() :]).strip()
+            for i in range(lo, hi + 1)
+        ]
+
+    prefixes_env = os.getenv("S3_NUPLAN_EMBED_CAMERA_PREFIXES", "").strip()
+    if prefixes_env:
+        out: list[str] = []
+        for part in prefixes_env.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            out.extend(expand_range(part))
+        return out if out else [prefixes_env]
+
+    single = os.getenv(
+        "S3_NUPLAN_EMBED_CAMERA_PREFIX",
+        "nuplan-v1.1/sensor_blobs/camera_0/nuplan-v1.1_mini_camera_0",
+    ).strip()
+    return expand_range(single)
+
+
 def materialize_window_frames(
     s3_client: object,
     scene: SceneWindow,
@@ -211,14 +430,45 @@ def materialize_window_frames(
             except ClientError as e:
                 if e.response["Error"]["Code"] != "404":
                     raise
-                # Fallback: layout BUCKET/<prefix>/<log_id>/<CAM_*>/<filename>
-                # e.g. nuplan-v1.1/sensor_blobs/camera_0/nuplan-v1.1_mini_camera_0/<file_name>/CAM_B0/...
-                prefix_before_log = os.getenv(
-                    "S3_NUPLAN_EMBED_CAMERA_PREFIX",
-                    "nuplan-v1.1/sensor_blobs/camera_0/nuplan-v1.1_mini_camera_0",
-                )
-                alt_key = f"{prefix_before_log.rstrip('/')}/{scene.log_id}/{channel}/{os.path.basename(key)}"
-                s3_client.download_file(bucket, alt_key, local_path)
+                # Fallback 1: key may have duplicate log_id (e.g. .../log_id/log_id/CAM_B0/...).
+                # Try key with one log_id segment removed so existing scene_windows.jsonl still works.
+                double_segment = f"/{scene.log_id}/{scene.log_id}/"
+                if double_segment in key:
+                    alt_key = key.replace(double_segment, f"/{scene.log_id}/", 1)
+                    try:
+                        s3_client.download_file(bucket, alt_key, local_path)
+                        last_err = None
+                    except ClientError as err:
+                        last_err = err
+                else:
+                    last_err = e
+                # Fallback 2: try other camera_* prefixes, preserving path suffix
+                # (log_id/CAM_ANGLE/filename or log_id/filename) so frames under
+                # camera_1..8 are found when the written URI used camera_0.
+                if last_err is not None and last_err.response["Error"]["Code"] == "404":
+                    prefix_list = get_embed_camera_prefix_list()
+                    last_err = None
+                    suffix = None
+                    match = re.search(r"/(nuplan-v1\.1_mini_camera_\d+)(/.*)$", key)
+                    if match:
+                        suffix = match.group(2).lstrip("/")
+                    if not suffix:
+                        suffix = f"{scene.log_id}/{os.path.basename(key)}"
+                    for prefix in prefix_list:
+                        alt_key = f"{prefix.rstrip('/')}/{suffix}"
+                        try:
+                            s3_client.download_file(bucket, alt_key, local_path)
+                            last_err = None
+                            break
+                        except ClientError as err:
+                            if err.response["Error"]["Code"] != "404":
+                                raise
+                            last_err = err
+                    if last_err is not None:
+                        raise RuntimeError(
+                            f"S3 key not found: bucket={bucket} key={key}; "
+                            f"tried deduplicated key and {len(prefix_list)} fallback prefix(es), all 404."
+                        ) from last_err
             frames[channel].append(local_path)
     return frames
 
@@ -449,92 +699,6 @@ def encode_window_cosmos(
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-
-def fake_encode_window(
-    window_spec: WindowSpec,
-    embedding_dim: int,
-) -> np.ndarray:
-    '''
-    Purpose: Deterministic placeholder encoder keyed on window_id.
-    Parameters:
-        window_spec (WindowSpec): Window to encode.
-        embedding_dim (int): Target vector dimension.
-    Returns:
-        np.ndarray: Deterministic L2-normalized float32 vector.
-    Called by: main().
-    Calls: hashlib.sha256(), numpy.random.default_rng().
-    '''
-    seed_material = (
-        f"{window_spec.window_id}|"
-        f"{window_spec.scene_token_hex}|"
-        f"{window_spec.tick_count}"
-    )
-    digest = hashlib.sha256(seed_material.encode("utf-8")).digest()
-    seed = int.from_bytes(digest[:8], byteorder="big", signed=False)
-    rng = np.random.default_rng(seed)
-    vec = rng.standard_normal(
-        size=(embedding_dim,), dtype=np.float32,
-    )
-    norm = np.linalg.norm(vec)
-    return vec / (norm + 1e-12)
-
-
-# -------------------------------------------------------------------
-# Legacy single-scene encoder (preserved for backward compat)
-# -------------------------------------------------------------------
-
-def fake_encode_scene(
-    scene: SceneWindow,
-    embedding_dim: int,
-) -> np.ndarray:
-    '''
-    Purpose: Deterministic placeholder encoder for pipeline bring-up.
-    Parameters:
-        scene (SceneWindow): Extracted scene artifact.
-        embedding_dim (int): Target vector dimension.
-    Returns:
-        np.ndarray: Deterministic float32 embedding vector.
-    Called by: encode_scene().
-    Calls: hashlib.sha256(), numpy.random.default_rng().
-    '''
-    seed_material = (
-        f"{scene.scene_token_hex}|{scene.log_id}|"
-        f"{len(scene.ticks)}|{','.join(scene.scenario_tags)}"
-    )
-    digest = hashlib.sha256(seed_material.encode("utf-8")).digest()
-    seed = int.from_bytes(digest[:8], byteorder="big", signed=False)
-    rng = np.random.default_rng(seed)
-    vec = rng.standard_normal(
-        size=(embedding_dim,), dtype=np.float32,
-    )
-    norm = np.linalg.norm(vec)
-    return vec / (norm + 1e-12)
-
-
-def encode_scene(
-    scene: SceneWindow,
-    encoder: str,
-    embedding_dim: int,
-) -> np.ndarray:
-    '''
-    Purpose: Legacy dispatch for single-scene encoding.
-    Parameters:
-        scene (SceneWindow): Scene artifact.
-        encoder (str): Encoder backend id.
-        embedding_dim (int): Target vector dimension.
-    Returns:
-        np.ndarray: Scene embedding vector.
-    Called by: External callers using the old API.
-    Calls: fake_encode_scene().
-    '''
-    if encoder == "fake":
-        return fake_encode_scene(scene, embedding_dim)
-    raise NotImplementedError(
-        f"Encoder '{encoder}' not implemented for legacy "
-        "single-scene path. Use the window-based pipeline."
-    )
-
-
 # -------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------
@@ -542,16 +706,20 @@ def encode_scene(
 def main() -> None:
     '''
     Purpose: Slice scenes into temporal windows, encode each window,
-        and write WindowEmbeddingRecord JSONL output.
+        and write WindowEmbeddingRecord JSONL output. Supports resume-from
+        (skip already-embedded window_ids) and checkpoint-every (rotate to
+        a new file every N scenes).
     Parameters: None.
     Returns: None.
     Called by: CLI invocation.
-    Calls: iter_scene_windows(), slice_windows(),
-        fake_encode_window(), encode_window_cosmos().
+    Calls: iter_scene_windows(), slice_windows(), load_resume_window_ids(),
+        output_stem_for_checkpoints(), fake_encode_window(), encode_window_cosmos().
     '''
     load_dotenv()
     args = parse_args()
-    os.makedirs(os.path.dirname(args.output_jsonl) or ".", exist_ok=True)
+    out_dir = os.path.dirname(args.output_jsonl)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
     frame_w, frame_h = (int(x) for x in args.frame_resize.split("x"))
     frame_size = (frame_w, frame_h)
@@ -562,16 +730,61 @@ def main() -> None:
         from pipeline.s3_retrieval import make_s3_client
         s3_client = make_s3_client()
 
+    scenes = list(iter_scene_windows(args.input_jsonl))
+    work_plan: list[tuple[SceneWindow, list[WindowSpec]]] = []
+    total_windows = 0
+    for scene in scenes:
+        windows = slice_windows(
+            scene,
+            args.window_size_ticks,
+            args.window_stride_ticks,
+            args.max_windows_per_scene,
+        )
+        work_plan.append((scene, windows))
+        total_windows += len(windows)
+
+    done_window_ids: set[str] = set()
+    if args.resume_from:
+        done_window_ids = load_resume_window_ids(args.resume_from)
+        if not done_window_ids and os.path.isfile(args.resume_from):
+            pass
+        elif not os.path.isfile(args.resume_from):
+            print(f"Warning: resume-from file not found, skipping no windows: {args.resume_from}")
+        else:
+            print(f"Resuming from {args.resume_from} ({len(done_window_ids)} window_ids to skip).")
+
+    total_to_do = sum(
+        1 for _scene, wins in work_plan for w in wins if w.window_id not in done_window_ids
+    )
+    print(
+        f"Loaded {len(scenes)} scenes -> "
+        f"{total_windows} windows to embed ({total_to_do} new after resume)"
+    )
+
+    progress = TmuxProgress(total_to_do, label="Embed")
     count = 0
-    with open(args.output_jsonl, "w", encoding="utf-8") as out:
-        for scene in iter_scene_windows(args.input_jsonl):
-            windows = slice_windows(
-                scene,
-                args.window_size_ticks,
-                args.window_stride_ticks,
-                args.max_windows_per_scene,
-            )
+    checkpoint_every = getattr(args, "checkpoint_every", 0) or 0
+    stem = output_stem_for_checkpoints(args.output_jsonl) if checkpoint_every > 0 else None
+    current_checkpoint = 0
+    out_file = None
+
+    try:
+        for scene_idx, (scene, windows) in enumerate(work_plan):
+            if checkpoint_every > 0:
+                desired = (scene_idx // checkpoint_every) + 1
+                if out_file is None or desired != current_checkpoint:
+                    if out_file is not None:
+                        out_file.close()
+                    path = f"{stem}_{desired:03d}.jsonl"
+                    out_file = open(path, "w", encoding="utf-8")
+                    current_checkpoint = desired
+                    print(f"Checkpoint: writing to {path}")
+            elif out_file is None:
+                out_file = open(args.output_jsonl, "w", encoding="utf-8")
+
             for win in windows:
+                if win.window_id in done_window_ids:
+                    continue
                 if args.encoder == "fake":
                     emb = fake_encode_window(
                         win, args.embedding_dim,
@@ -603,15 +816,22 @@ def main() -> None:
                         "encoder": args.encoder,
                     },
                 )
-                out.write(
+                out_file.write(
                     json.dumps(record.model_dump()) + "\n",
                 )
                 count += 1
+                progress.update(count)
+    finally:
+        if out_file is not None:
+            out_file.close()
 
-            if count % 50 == 0 and count > 0:
-                print(f"  ... {count} windows embedded so far")
-
-    print(f"Embedded {count} windows -> {args.output_jsonl}")
+    progress.finish()
+    if count == 0:
+        print("Embedded 0 new windows (all skipped by resume).")
+    elif checkpoint_every > 0:
+        print(f"Embedded {count} windows -> {stem}_*.jsonl (checkpoints)")
+    else:
+        print(f"Embedded {count} windows -> {args.output_jsonl}")
 
 
 if __name__ == "__main__":

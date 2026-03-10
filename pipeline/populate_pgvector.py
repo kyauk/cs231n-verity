@@ -3,6 +3,12 @@
 Supports two target tables:
   - scene_embeddings: legacy per-scene vectors
   - window_embeddings: temporal-window vectors (default)
+
+Usage:
+  python -m pipeline.populate_pgvector \\
+      --input-jsonl outputs/window_embeddings_cosmos.jsonl \\
+      --table window_embeddings \\
+      --embedding-dim 2048
 """
 
 from __future__ import annotations

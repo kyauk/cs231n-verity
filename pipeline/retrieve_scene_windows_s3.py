@@ -1,4 +1,11 @@
-"""CLI to retrieve nuPlan logs from S3 and emit scene-window JSONL artifacts."""
+"""CLI to retrieve nuPlan logs from S3 and emit scene-window JSONL artifacts.
+
+Usage:
+  python -m pipeline.retrieve_scene_windows_s3 \\
+      --bucket my-nuplan-bucket \\
+      --output-jsonl outputs/scene_windows.jsonl \\
+      --max-logs 1
+"""
 
 from __future__ import annotations
 
@@ -126,7 +133,9 @@ def main() -> None:
             for log_obj in batch:
                 db_local_path = download_db_to_tempfile(s3_client, log_obj)
                 try:
-                    image_prefix = f"s3://{bucket}/{args.camera_prefix_root}/{log_obj.log_id}"
+                    # nuPlan DB image.filename_jpg already includes log_id (e.g. log_id/CAM_B0/file.jpg).
+                    # Do not append log_id again or S3 key becomes .../log_id/log_id/CAM_B0/...
+                    image_prefix = f"s3://{bucket}/{args.camera_prefix_root}"
                     scenes = extract_scene_windows(
                         db_path=db_local_path,
                         log_id=log_obj.log_id,

@@ -4,3 +4,10 @@ __pycache__/
 .env
 bevfusion/
 docs/
+.cursor/
+outputs/
+pipeline/__pycache__/
+pipeline/models/__pycache__/
+pipeline/render_window_clip.py
+pipeline/visualize_embeddings.py
+
