@@ -27,6 +27,39 @@ if not os.environ.get("MAGICK_HOME"):
         )
 
 
+def _apply_sensor_noise(img_array, noise_level):
+    """Apply the same sensor noise that ControlEnv applies during step/reset.
+
+    noise_level encoding (matches ControlEnv):
+      1-10  motion blur    (severity = noise_level)
+      11-20 gaussian blur  (severity = noise_level - 10)
+      21-30 zoom blur      (severity = noise_level - 20)
+      31-40 fog            (severity = noise_level - 30)
+      41-50 glass blur     (severity = noise_level - 40)
+    """
+    import numpy as np
+    from PIL import Image as _PILImage
+    from libero.libero.envs.env_wrapper import (
+        motion_blur, gaussian_blur, zoom_blur, fog, glass_blur,
+    )
+
+    if img_array.dtype != np.uint8:
+        img_array = (img_array * 255).astype(np.uint8)
+    pil_image = _PILImage.fromarray(img_array)
+
+    if noise_level <= 10:
+        return motion_blur(pil_image, severity=noise_level)
+    elif noise_level <= 20:
+        return gaussian_blur(pil_image, severity=noise_level - 10).astype(np.uint8)
+    elif noise_level <= 30:
+        return zoom_blur(pil_image, severity=noise_level - 20).astype(np.uint8)
+    elif noise_level <= 40:
+        return fog(pil_image, severity=noise_level - 30).astype(np.uint8)
+    elif noise_level <= 50:
+        return glass_blur(pil_image, severity=noise_level - 40).astype(np.uint8)
+    return img_array
+
+
 def render_previews(manifest_path: str, source_bddl: str):
     """Render preview images for every task in a job manifest."""
     import torch
@@ -70,7 +103,16 @@ def render_previews(manifest_path: str, source_bddl: str):
                 obs = env.set_init_state(states[0])
             else:
                 obs = env.reset()
-            Image.fromarray(obs["agentview_image"][::-1]).save(preview_path)
+
+            img_array = obs["agentview_image"][::-1]
+
+            # set_init_state bypasses ControlEnv.reset(), so sensor noise
+            # parsed from the filename is never applied. Apply it here.
+            noise_level = getattr(env, "noise", 0)
+            if noise_level:
+                img_array = _apply_sensor_noise(img_array, noise_level)
+
+            Image.fromarray(img_array).save(preview_path)
             task["preview"] = f"{task['name']}.png"
             rendered += 1
             env.close()

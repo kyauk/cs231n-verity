@@ -417,7 +417,7 @@
           <div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--bg-secondary);color:var(--text-muted);font-size:0.8rem;">No preview</div>
           <div class="gallery-card-info">
             <span class="pert-type">${task.perturbation.replace("_", " ")}</span>
-            <div class="variant-label">Variant ${task.variant}</div>
+            <div class="variant-label">Variant ${task.variant}${paramStr ? " — " + paramStr : ""}</div>
           </div>`;
       }
       gallery.appendChild(card);

@@ -65,6 +65,12 @@ body {
   font-weight: 800;
 }
 
+.logo-accent {
+  color: #4da6ff;
+  font-weight: 800;
+  text-shadow: 0 0 12px rgba(77, 166, 255, 0.5);
+}
+
 .subtitle {
   color: var(--text-secondary);
   font-size: 0.95rem;
