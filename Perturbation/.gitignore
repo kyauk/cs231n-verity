@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Pipeline output
+output/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# LIBERO-plus downloaded data (large files, not source code)
+LIBERO-plus-main/libero/libero/assets/
+LIBERO-plus-main/libero/libero/bddl_files/
+LIBERO-plus-main/libero/libero/init_files/
+LIBERO-plus-main/libero/datasets/
+LIBERO-plus-main/libero.egg-info/
+LIBERO-plus-main/static/
+
+# LIBERO runtime artifacts
+MUJOCO_LOG.TXT
+wandb/
+.hydra/
+*.log
+
+# Misc
+prototype/
+*.zip
