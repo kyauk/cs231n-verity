@@ -1,0 +1,10 @@
+{
+  "selected_count": 12,
+  "created_count": 12,
+  "error_count": 0,
+  "manifest_path": "outputs/flagged_visuals/manifest.jsonl",
+  "camera_channel": "CAM_F0",
+  "only_noise": true,
+  "top_k": 12,
+  "errors": []
+}
