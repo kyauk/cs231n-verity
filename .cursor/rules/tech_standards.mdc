@@ -1,0 +1,247 @@
+---
+description: Full technical stack, architecture decisions, and enforced coding conventions for the Edge Case Discovery Engine
+globs: "**/*"
+alwaysApply: true
+---
+
+# Edge Case Discovery Engine: Technical Reference
+
+## 1. Stack Overview
+
+| Layer | Technology |
+|---|---|
+| Scene Embedding | NV-DINOv2 ViT-L via NIM API (1024d/image, 4096d scene vector) |
+| Dimensionality Reduction | UMAP (target ~50d) |
+| Clustering | HDBSCAN + GLOSH |
+| Backend API | Python 3.11+ · FastAPI (async) |
+| Agent Orchestration | LangGraph (multi-agent pipeline) |
+| Primary LLM/Vision | NVIDIA NIM — OpenAI-compatible API |
+| Vector Store | pgvector extension on PostgreSQL |
+| Primary Database | PostgreSQL (scene embeddings, cluster metadata, reports) |
+| Frontend | Next.js (TypeScript, App Router) |
+| Containerization | Docker · Docker Compose for local dev |
+| Dataset | nuPlan (nuplan-devkit) |
+| Linter | flake8 |
+| Config | `.env` + `python-dotenv` |
+
+---
+
+## 2. Backend Architecture (FastAPI)
+
+### Service Structure
+The backend is a single FastAPI application organized into routers by pipeline stage. All routes are **async-first** using `async def` and `asyncio`.
+
+### API Naming Convention
+All endpoints follow `/<action_type>/<specific_action>`:
+```
+POST   /ingest/log_corpus
+POST   /generate/scene_embeddings
+POST   /cluster/scene_embeddings
+POST   /describe/flagged_scenes
+POST   /debate/coverage_gaps
+GET    /fetch/flagged_clusters/{run_id}
+GET    /assemble/gap_report/{run_id}
+```
+
+### Data Contracts
+All request and response bodies are defined as **Pydantic models**. No raw dicts in route signatures.
+
+```python
+class LogCorpusInput(BaseModel):
+    dataset_name: str
+    corpus_ref: str
+    split_name: Optional[str]
+    max_scenes: Optional[int]
+    include_tokens: Optional[list[str]]
+```
+
+Data passed between services uses **JSON** wherever possible. CSV is an acceptable fallback for bulk exports only.
+
+---
+
+## 3. Agent Orchestration (LangGraph)
+
+The discovery pipeline is implemented as a **LangGraph state graph**, where each node is a specialized processing or reasoning step. This directly supports PRD v2's V0 coverage-gap workflow and V1 extension roadmap.
+
+### V0 Graph (Coverage Discovery)
+```
+ingest_node → embedding_node → clustering_node → description_node → debate_node → report_assembly_node
+```
+
+### V1 Graph (Multi-Agent Debate)
+```
+ingest_node → embedding_node → clustering_node → description_node → [critic_agent → safety_agent → coverage_agent] → report_assembly_node
+```
+- The `safety_agent` evaluates risk blind to critic conclusions.
+- The `coverage_agent` cross-references against regression-suite context.
+- Every engineer override collected in the workspace UI is logged as a structured training signal.
+
+### Agent Conventions
+- Each agent node is a standalone async Python function.
+- Agents must surface uncertainty explicitly — never assert a conclusion without a confidence level and cited evidence.
+- Use explicit uncertain states (`INSUFFICIENT_EVIDENCE`, `ARTIFACT_RISK`) rather than forcing confident outputs.
+
+---
+
+## 4. LLM Integration (NVIDIA NIM)
+
+- All scene-description and debate calls go through the NVIDIA NIM API using the OpenAI-compatible client (`openai.AsyncOpenAI` pointed at the NVIDIA base URL).
+- Credentials are loaded from `.env` as `NVIDIA_API_KEY` and `NVIDIA_BASE_URL`.
+- Model selection (e.g. `meta/llama-3.1-70b-instruct`) is set via env var `NVIDIA_MODEL_ID`; optional vision model selection can use `NVIDIA_VISION_MODEL_ID`.
+- All calls are **async**. Never use blocking `openai.ChatCompletion` patterns.
+
+```python
+client = AsyncOpenAI(
+    api_key=os.getenv("NVIDIA_API_KEY"),
+    base_url=os.getenv("NVIDIA_BASE_URL"),
+)
+```
+
+---
+
+## 5. Database & Vector Store (PostgreSQL + pgvector)
+
+- A single PostgreSQL instance runs both relational tables and the `pgvector` extension — no separate vector service.
+- The `scene_embeddings` table holds scene vectors as `embedding vector(4096)` with token traceability.
+- Use `asyncpg` as the async PostgreSQL driver. All DB calls are async.
+- Similarity search uses `<=>` (cosine distance) operator from pgvector.
+- Migrations are managed via **Alembic**.
+
+### Key Tables
+```sql
+scene_embeddings     -- token-level scene vectors and metadata
+cluster_findings     -- cluster_id, anomaly_type, glosh_score, and rarity metadata
+scene_descriptions   -- NIM-generated scene descriptions for flagged findings
+debate_verdicts      -- critic/safety/coverage outputs with confidence and rationale
+gap_reports          -- ranked output buckets per run
+engineer_feedback    -- override and usefulness signals from workspace UI
+```
+
+---
+
+## 6. Frontend (Next.js)
+
+- **TypeScript** throughout. No untyped `any` in component props or API response shapes.
+- **App Router** (not Pages Router).
+- API calls from the frontend hit the FastAPI backend directly via `fetch` with typed response interfaces.
+- The Discovery Workspace is a single-page view with panels for corpus context, flagged clusters, scene descriptions, debate transcript, ranked report buckets, and engineer feedback input.
+- Environment variable for backend URL: `NEXT_PUBLIC_API_URL` in `.env.local`.
+
+---
+
+## 7. Containerization
+
+- `docker-compose.yml` defines three services: `api` (FastAPI), `db` (PostgreSQL + pgvector), `frontend` (Next.js).
+- All secrets and config are injected via `.env` — never hardcoded in `docker-compose.yml` or application code.
+- The `db` service uses the `pgvector/pgvector:pg16` base image.
+
+---
+
+## 8. Coding Conventions (Enforced)
+
+### Naming
+- **Classes:** `CamelCase` (e.g. `FailureCapsule`, `TriageAgent`)
+- **Scripts & functions:** `snake_case` (e.g. `generate_failure_capsule.py`, `def retrieve_similar_cases()`)
+- **Variables:** `snake_case`
+
+### Linting
+- **flake8** is the enforced linter for all Python files. CI should fail on flake8 errors.
+
+### Docstrings
+Every function must have a `'''` docstring immediately below the `def` line containing:
+- **Purpose:** what the function does
+- **Parameters:** name, type, description for each argument
+- **Returns:** return type and shape (include tensor/array dimensions if applicable)
+- **Called by:** which module or function invokes this (if known)
+- **Calls:** which external functions or services this depends on
+
+```python
+def retrieve_similar_cases(capsule_id: str, top_k: int = 5) -> list[SimilarCase]:
+    '''
+    Purpose: Queries pgvector for the top-k failure capsules most semantically
+             similar to the given capsule, ranked by cosine distance.
+    Parameters:
+        capsule_id (str): UUID of the normalized failure capsule to embed and query against.
+        top_k (int): Number of similar cases to return. Default 5.
+    Returns:
+        list[SimilarCase]: Ranked list of similar capsule objects with match reason fields.
+                           Shape: list of length <= top_k.
+    Called by: triage_agent.py → retrieval_node
+    Calls: db/vector_store.py → cosine_search(), capsule_repo.py → get_by_id()
+    '''
+    # Fetch embedding for the target capsule from the DB
+    ...
+    # Run cosine similarity query via pgvector <=> operator
+    ...
+    # Map raw DB rows to SimilarCase Pydantic models before returning
+    ...
+```
+
+### Inline Comments
+All non-trivial logic blocks must have inline comments explaining *why*, not just *what*.
+
+---
+
+## 9. Git Conventions
+
+### Branching
+- Feature branches: `/<workarea>-<username>` (e.g. `/retrieval-jasonw`)
+- Work area branches: `/<workarea>` (e.g. `/retrieval`, `/capsule-generation`, `/workspace-ui`)
+- All work merges to `main` or a workarea branch via **pull request only**.
+
+### Commits
+- Commit messages must clearly describe what the commit accomplishes.
+- Prefer incremental commits over large monolithic ones. If a commit is large or complex, call it out explicitly in the description.
+
+### Pull Requests
+- Every PR into `main` or a workarea branch requires **at least one reviewer**.
+- PR description must detail changes and explain how a reviewer can test for expected functionality.
+- Reviewers must complete reviews within **24 hours** of being tagged.
+
+---
+
+## 10. Project Folder Conventions
+
+```
+/backend
+  /agents          # LangGraph nodes and agent logic
+  /api             # FastAPI routers
+  /db              # asyncpg connection, Alembic migrations, repos
+  /models          # Pydantic schemas
+  /services        # LLM client, embedding utilities
+  /tests
+/frontend          # Next.js app
+/docs              # PDFs, papers, reference materials
+  README.md        # Summary of each resource (one paragraph per doc)
+/docker-compose.yml
+/.env.example
+```
+
+- `/docs` must contain a `README.md` with a description and summary of every reference material added to the folder.
+- Model checkpoints saved as `.pt` files, organized under `/checkpoints/<model_name>/epoch_<N>/` with a `README.md` describing performance. Poor-performing runs should be deleted rather than committed.
+
+---
+
+## 11. Environment Variables Reference
+
+```bash
+# NVIDIA NIM
+NVIDIA_API_KEY=
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL_ID=meta/llama-3.1-70b-instruct
+NVIDIA_VISION_MODEL_ID=meta/llama-3.2-90b-vision-instruct
+NVIDIA_EMBEDDING_MODEL_ID=nvidia/nv-dinov2
+
+# nuPlan / discovery pipeline
+NUPLAN_DATA_ROOT=
+UMAP_RANDOM_SEED=42
+UMAP_N_COMPONENTS=50
+HDBSCAN_MIN_CLUSTER_SIZE=
+GLOSH_THRESHOLD=0.7
+
+# PostgreSQL
+DATABASE_URL=postgresql+asyncpg://user:password@db:5432/edge_case_discovery
+
+# Next.js
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```

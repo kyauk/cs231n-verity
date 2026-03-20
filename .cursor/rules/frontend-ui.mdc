@@ -1,0 +1,24 @@
+---
+description: Frontend implementation rules for the Triage Refinery Next.js workspace UI
+globs: frontend/**/*.ts,frontend/**/*.tsx,frontend/**/*.css
+alwaysApply: false
+---
+
+# Frontend UI Rule
+
+## Scope
+Applies to all files under `frontend/` for the Next.js App Router UI.
+
+## Requirements
+- Use TypeScript for all component and API-layer code; avoid `any`.
+- Keep API contracts aligned with backend Pydantic schemas from [`backend/models/api_schemas.py`](mdc:backend/models/api_schemas.py) and boundary expectations in [`interfaces.mdc`](mdc:.cursor/rules/interfaces.mdc).
+- Use `camelCase` field names in frontend request/response types.
+- Keep API calls centralized in `frontend/lib/api.ts` rather than scattering raw `fetch` calls across components.
+- Preserve clear loading/error/partial-success states in the workspace flow.
+- For unimplemented backend endpoints, use explicit placeholder panels instead of fake hidden logic.
+
+## UX Expectations
+- The workspace should prioritize fast triage: ticket input, capsule output, and actionable status at a glance.
+- Every required form field should be visibly marked and validated inline.
+- Use accessible contrast and keyboard-friendly controls for all interactive UI elements.
+- Keep component responsibilities narrow: presentational sections in `frontend/components/`, orchestration/state in `frontend/app/page.tsx`.
