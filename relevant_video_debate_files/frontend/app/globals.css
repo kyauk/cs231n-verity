@@ -886,3 +886,65 @@ select:focus {
   align-items: center;
   gap: 10px;
 }
+
+.pipeline-progress-panel {
+  margin-top: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  background: rgba(12, 22, 36, 0.85);
+  overflow: hidden;
+}
+
+.pipeline-progress-header {
+  padding: 10px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9fb6d6;
+  border-bottom: 1px solid rgba(120, 150, 190, 0.2);
+}
+
+.pipeline-progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 10px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.pipeline-progress-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  padding: 8px 14px;
+  border-left: 3px solid transparent;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.pipeline-progress-row.is-active {
+  border-left-color: #5ba8ff;
+  background: rgba(80, 140, 220, 0.08);
+  color: var(--text-strong);
+}
+
+.pipeline-progress-row time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: #7a92b3;
+  white-space: nowrap;
+}
+
+.pipeline-progress-title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.pipeline-progress-detail {
+  grid-column: 2;
+  margin-top: 2px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #8fa3bd;
+}

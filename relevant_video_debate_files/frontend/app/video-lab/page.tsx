@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 
-import { ApiError, fetch_workspace_snapshot, run_video_pipeline } from "@/lib/api";
-import type { WorkspaceFlaggedItem, WorkspaceReasoningItem } from "@/types/api";
+import { ApiError, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
+import type { PipelineProgressPayload, WorkspaceFlaggedItem, WorkspaceReasoningItem } from "@/types/api";
 
 type DebateTurn = {
   round: number;
@@ -72,6 +72,18 @@ function build_scene_report_ticket(
   ].join("\n");
 }
 
+type ProgressRow = {
+  key: string;
+  step: string;
+  title: string;
+  detail: string;
+  time_label: string;
+};
+
+function format_progress_time(): string {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 export default function VideoLabPage(): JSX.Element {
   const [video_file, set_video_file] = useState<File | null>(null);
   const [running, setRunning] = useState<boolean>(false);
@@ -81,6 +93,20 @@ export default function VideoLabPage(): JSX.Element {
   const [reasoning_summary, set_reasoning_summary] = useState<Record<string, unknown> | null>(null);
   const [latest_reasoning, set_latest_reasoning] = useState<WorkspaceReasoningItem | null>(null);
   const [latest_flagged, set_latest_flagged] = useState<WorkspaceFlaggedItem | null>(null);
+  const [progress_log, set_progress_log] = useState<ProgressRow[]>([]);
+
+  function append_progress(payload: PipelineProgressPayload): void {
+    set_progress_log((prev) => {
+      const row: ProgressRow = {
+        key: `${payload.step}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        step: payload.step,
+        title: payload.title,
+        detail: payload.detail,
+        time_label: format_progress_time()
+      };
+      return [...prev, row].slice(-40);
+    });
+  }
 
   async function on_run(): Promise<void> {
     if (!video_file) {
@@ -91,11 +117,12 @@ export default function VideoLabPage(): JSX.Element {
     setStatus("");
     setError("");
     setStdout("");
+    set_progress_log([]);
     set_reasoning_summary(null);
     set_latest_reasoning(null);
     set_latest_flagged(null);
     try {
-      const response = await run_video_pipeline(video_file);
+      const response = await run_video_pipeline_stream(video_file, append_progress);
       setStatus(response.message);
       setStdout(sanitize_run_log(response.stdout || response.stderr || ""));
       set_reasoning_summary(response.reasoningSummary);
@@ -166,6 +193,28 @@ export default function VideoLabPage(): JSX.Element {
 
         {status ? <div className="alert alert-success">{status}</div> : null}
         {error ? <div className="alert alert-error">{error}</div> : null}
+
+        {running || progress_log.length > 0 ? (
+          <div className="pipeline-progress-panel" aria-live="polite">
+            <div className="pipeline-progress-header">
+              {running ? "Pipeline progress" : "Last run timeline"}
+            </div>
+            <ul className="pipeline-progress-list">
+              {progress_log.map((row, index) => (
+                <li
+                  key={row.key}
+                  className={`pipeline-progress-row${running && index === progress_log.length - 1 ? " is-active" : ""}`}
+                >
+                  <time dateTime={row.time_label}>{row.time_label}</time>
+                  <div>
+                    <div className="pipeline-progress-title">{row.title}</div>
+                    {row.detail ? <div className="pipeline-progress-detail">{row.detail}</div> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {latest_flagged ? (
           <div className="video-card">

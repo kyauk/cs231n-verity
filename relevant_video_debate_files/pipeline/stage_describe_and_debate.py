@@ -20,6 +20,43 @@ from pipeline.models.handoff_contracts import (
     SceneDescriptionOutputRecord,
 )
 
+PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
+
+
+def _emit_pipeline_progress(step: str, title: str, detail: str = "") -> None:
+    """Structured stdout line for streaming UIs (parsed by remote runner / Next route)."""
+    payload = json.dumps(
+        {"step": step, "title": title, "detail": detail},
+        ensure_ascii=False,
+    )
+    print(f"{PROGRESS_PREFIX}{payload}", flush=True)
+
+
+def _patch_transformers_video_backend_pyav() -> None:
+    """
+    Hugging Face video processors default to torchcodec, then torchvision.io.read_video.
+    torchvision 0.26+ removed read_video; torchcodec often needs extra system CUDA/FFmpeg bits.
+    PyAV (`pip install av`) is reliable for decoding local paths used here.
+    """
+    if getattr(_patch_transformers_video_backend_pyav, "_done", False):
+        return
+    import transformers.video_processing_utils as vpu
+    from transformers.video_utils import load_video
+
+    def fetch_videos_pyav(self, video_url_or_urls, sample_indices_fn=None):  # noqa: ANN001
+        if isinstance(video_url_or_urls, list):
+            return list(
+                zip(*[self.fetch_videos(x, sample_indices_fn=sample_indices_fn) for x in video_url_or_urls])
+            )
+        return load_video(
+            video_url_or_urls,
+            backend="pyav",
+            sample_indices_fn=sample_indices_fn,
+        )
+
+    vpu.BaseVideoProcessor.fetch_videos = fetch_videos_pyav  # type: ignore[method-assign]
+    setattr(_patch_transformers_video_backend_pyav, "_done", True)
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -232,6 +269,8 @@ def _hf_chat_completion(
             "Description stage requires transformers, torch, and torchvision in current environment."
         ) from error
 
+    _patch_transformers_video_backend_pyav()
+
     model_id = os.getenv("COSMOS_HF_MODEL_ID", "nvidia/Cosmos-Reason2-8B")
     max_new_tokens = max_new_tokens_override or int(os.getenv("COSMOS_HF_MAX_NEW_TOKENS", "3200"))
     video_fps = float(os.getenv("COSMOS_HF_VIDEO_FPS", "8"))
@@ -240,6 +279,11 @@ def _hf_chat_completion(
 
     cache = getattr(_hf_chat_completion, "_cache", None)
     if cache is None or cache.get("model_id") != model_id:
+        _emit_pipeline_progress(
+            "model_load",
+            "Loading vision-language model",
+            "Downloading or loading weights (first run is slower); please wait.",
+        )
         model = transformers.Qwen3VLForConditionalGeneration.from_pretrained(
             model_id,
             dtype=dtype,
@@ -250,6 +294,11 @@ def _hf_chat_completion(
         processor = transformers.AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
         cache = {"model_id": model_id, "model": model, "processor": processor}
         setattr(_hf_chat_completion, "_cache", cache)
+        _emit_pipeline_progress(
+            "model_ready",
+            "Model ready",
+            f"{model_id} is loaded and ready for inference.",
+        )
 
     model = cache["model"]
     processor = cache["processor"]
@@ -307,7 +356,7 @@ def _hf_chat_completion(
         add_generation_prompt=True,
         return_dict=True,
         return_tensors="pt",
-        fps=video_fps,
+        processor_kwargs={"fps": video_fps},
     )
     inputs = inputs.to(model.device)
     generated_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
@@ -469,6 +518,49 @@ def _looks_truncated(raw: str) -> bool:
     return in_string or depth > 0
 
 
+def _parse_json_object_from_markup(text: str, stage_name: str) -> dict[str, Any]:
+    """
+    Parse a JSON object from model output that may include <redacted_thinking>, prose, and <answer> wrappers.
+    """
+    work = text.strip()
+    if work.startswith("```"):
+        work = re.sub(r"^```(?:json)?\s*", "", work, flags=re.IGNORECASE)
+        work = re.sub(r"\s*```$", "", work).strip()
+
+    m = re.search(r"<answer>\s*", work, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        work = work[m.end() :].strip()
+    work = re.sub(r"</answer>\s*$", "", work, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    candidates: list[str] = [work]
+    for index, char in enumerate(work):
+        if char == "{":
+            candidates.append(work[index:])
+            break
+
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        chunk = candidate.strip()
+        if not chunk:
+            continue
+        try:
+            parsed = json.loads(chunk)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        try:
+            parsed, _ = decoder.raw_decode(chunk)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    raise RuntimeError(
+        f"{stage_name} output must contain a JSON object. Raw head: {text[:300]!r}"
+    )
+
+
 def _parse_cosmos_description(raw: str) -> dict[str, Any]:
     """
     Purpose: Parse description output into the strict required schema.
@@ -477,18 +569,16 @@ def _parse_cosmos_description(raw: str) -> dict[str, Any]:
     Returns:
         dict[str, Any]: scene_description, anomaly_rationale, confidence.
     Called by: main()
-    Calls: _parse_strict_json_object()
+    Calls: _parse_json_object_from_markup(), _looks_truncated()
     """
-
     try:
-        parsed = _parse_strict_json_object(raw, "Description stage")
+        parsed = _parse_json_object_from_markup(raw, "Description stage")
     except RuntimeError as error:
         if _looks_truncated(raw):
             raise DescriptionTruncatedError(
                 f"Description stage output appears truncated. Raw tail: {raw[-300:]!r}"
             ) from error
         raise
-
     required_keys = ("scene_description", "anomaly_rationale", "confidence")
     for key in required_keys:
         value = parsed.get(key)
@@ -589,11 +679,22 @@ def cosmos_multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateO
     rounds = max(1, rounds)
     suite_text = "\n".join([f"{index + 1}. {item}" for index, item in enumerate(record.regression_suite)])
 
+    _emit_pipeline_progress(
+        "debate",
+        "Regression suite debate",
+        f"{rounds} round(s): proponent, critic, then judge verdict via NIM.",
+    )
+
     history: list[str] = []
     latest_proponent = "No proponent argument yet."
     latest_critic = "No critic argument yet."
 
     for round_index in range(1, rounds + 1):
+        _emit_pipeline_progress(
+            "debate_round",
+            f"Debate round {round_index} of {rounds}",
+            "Proponent is drafting the regression-suite proposal…",
+        )
         transcript_so_far = "\n".join(history) if history else "No prior turns yet."
         latest_proponent = _nim_text_chat_completion(
             messages=[
@@ -622,6 +723,11 @@ def cosmos_multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateO
         ).strip()
         history.append(f"Round {round_index} - Proponent: {latest_proponent}")
 
+        _emit_pipeline_progress(
+            "debate_round",
+            f"Debate round {round_index} of {rounds}",
+            "Critic is reviewing the proposal…",
+        )
         transcript_so_far = "\n".join(history)
         latest_critic = _nim_text_chat_completion(
             messages=[
@@ -646,6 +752,11 @@ def cosmos_multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateO
         ).strip()
         history.append(f"Round {round_index} - Critic: {latest_critic}")
 
+    _emit_pipeline_progress(
+        "debate_judge",
+        "Judge verdict",
+        "Collecting final JSON decision from the judge model…",
+    )
     judge_raw = _nim_text_chat_completion(
         messages=[
             {
@@ -722,6 +833,12 @@ def main() -> int:
     os.environ["COSMOS_HF_MAX_NEW_TOKENS"] = str(args.hf_max_new_tokens)
     video_fps = float(os.getenv("COSMOS_HF_VIDEO_FPS", "8"))
 
+    _emit_pipeline_progress(
+        "start",
+        "Pipeline started",
+        "Loading anomaly inputs and media paths.",
+    )
+
     anomaly_rows = [AnomalyResultRecord.model_validate(row) for row in _read_jsonl(args.flagged_jsonl)]
     anomaly_rows = sorted(anomaly_rows, key=lambda row: row.anomaly_rank)[: max(1, args.top_k)]
     if not anomaly_rows:
@@ -754,8 +871,14 @@ def main() -> int:
     max_parse_retries = int(os.getenv("DESCRIPTION_MAX_PARSE_RETRIES", "2"))
 
     description_outputs: list[SceneDescriptionOutputRecord] = []
-    for record in description_inputs:
+    total_desc = len(description_inputs)
+    for desc_index, record in enumerate(description_inputs, start=1):
         try:
+            _emit_pipeline_progress(
+                "describe",
+                "Scene description",
+                f"Window {record.window_id} ({desc_index}/{total_desc}): decoding video and generating structured output…",
+            )
             media_blocks: list[dict[str, Any]] = []
             for media_ref in record.media_refs:
                 abs_path = os.path.abspath(media_ref)
@@ -848,6 +971,12 @@ def main() -> int:
             print(f"COSMOS_BLOCKED: true during description stage: {error}")
             return 1
 
+    _emit_pipeline_progress(
+        "describe_done",
+        "Scene description complete",
+        f"Processed {len(description_outputs)} window(s). Starting debate stage…",
+    )
+
     debate_inputs = [build_debate_input(record, regression_suite) for record in description_outputs]
     debate_outputs: list[DebateOutputRecord] = []
     for record in debate_inputs:
@@ -857,6 +986,11 @@ def main() -> int:
             print(f"COSMOS_BLOCKED: true during debate stage: {error}")
             return 1
 
+    _emit_pipeline_progress(
+        "save",
+        "Saving results",
+        "Writing JSONL outputs and summary.",
+    )
     os.makedirs(args.output_dir, exist_ok=True)
     description_inputs_path = os.path.join(args.output_dir, "description_inputs.jsonl")
     description_outputs_path = os.path.join(args.output_dir, "description_outputs.jsonl")

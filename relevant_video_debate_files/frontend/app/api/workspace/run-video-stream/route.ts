@@ -9,21 +9,35 @@ export const runtime = "nodejs";
 const PROJECT_ROOT = path.resolve(process.cwd(), "..");
 const OUTPUTS_ROOT = path.resolve(PROJECT_ROOT, "outputs");
 const INPUTS_ROOT = path.resolve(PROJECT_ROOT, "inputs");
-const REMOTE_GPU_RUN_URL = process.env.REMOTE_GPU_RUN_URL ?? "";
+const PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:";
+
+const REMOTE_GPU_STREAM_URL =
+  process.env.REMOTE_GPU_STREAM_URL?.trim() ||
+  (process.env.REMOTE_GPU_RUN_URL || "").replace(/\/?run-video\/?$/i, "/run-video-stream") ||
+  "";
+
 const FAST_PROFILE_VIDEO_FPS = process.env.WORKSPACE_VIDEO_FPS ?? "8";
 const FAST_PROFILE_MAX_NEW_TOKENS = process.env.WORKSPACE_MAX_NEW_TOKENS ?? "2400";
 const FAST_PROFILE_DEBATE_ROUNDS = process.env.WORKSPACE_DEBATE_ROUNDS ?? "2";
-
-type RunResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
-};
 
 type JsonRow = Record<string, unknown>;
 
 function sanitize_filename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function read_jsonl_rows(path_from_outputs: string): Promise<JsonRow[]> {
+  const target = path.resolve(OUTPUTS_ROOT, path_from_outputs);
+  try {
+    const content = await fs.readFile(target, "utf-8");
+    return content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as JsonRow);
+  } catch {
+    return [];
+  }
 }
 
 function as_string(value: unknown, fallback = ""): string {
@@ -47,20 +61,6 @@ function artifact_url(raw_path: unknown): string | null {
   }
   const relative = raw_path.replace(/^outputs\//, "");
   return `/api/workspace/artifact?path=${encodeURIComponent(relative)}`;
-}
-
-async function read_jsonl_rows(path_from_outputs: string): Promise<JsonRow[]> {
-  const target = path.resolve(OUTPUTS_ROOT, path_from_outputs);
-  try {
-    const content = await fs.readFile(target, "utf-8");
-    return content
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as JsonRow);
-  } catch {
-    return [];
-  }
 }
 
 async function load_latest_outputs(window_id: string): Promise<{
@@ -121,38 +121,6 @@ function is_mock_model_source(value: unknown): boolean {
   return normalized.includes("mock");
 }
 
-function run_process(command: string, args: string[], cwd: string): Promise<RunResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: {
-        ...process.env,
-        COSMOS_HF_VIDEO_FPS: FAST_PROFILE_VIDEO_FPS,
-        COSMOS_HF_MAX_NEW_TOKENS: FAST_PROFILE_MAX_NEW_TOKENS
-      },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf-8");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf-8");
-    });
-    child.on("error", (error) => reject(error));
-    child.on("close", (code) => {
-      resolve({
-        code: code ?? 1,
-        stdout,
-        stderr
-      });
-    });
-  });
-}
-
 async function ensure_default_regression_suite(path_from_outputs: string): Promise<void> {
   const target = path.resolve(OUTPUTS_ROOT, path_from_outputs);
   try {
@@ -182,33 +150,36 @@ async function resolve_python_bin(): Promise<string> {
   }
 }
 
-async function forward_to_remote_gpu(file: File): Promise<Response> {
+async function forward_remote_stream(file: File): Promise<Response> {
   const form = new FormData();
   form.append("video", file, file.name);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60 * 60 * 1000);
   try {
-    const response = await fetch(REMOTE_GPU_RUN_URL, {
+    const response = await fetch(REMOTE_GPU_STREAM_URL, {
       method: "POST",
       body: form,
       signal: controller.signal
     });
-    const response_text = await response.text();
-    let parsed: unknown;
-    try {
-      parsed = response_text ? JSON.parse(response_text) : {};
-    } catch {
-      parsed = {
-        detail: response_text || "Remote runner returned non-JSON response."
-      };
+    if (!response.ok || !response.body) {
+      const text = await response.text();
+      return NextResponse.json(
+        { detail: text || `Remote stream failed (${response.status})` },
+        { status: response.status }
+      );
     }
-    return NextResponse.json(parsed, { status: response.status });
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no"
+      }
+    });
   } catch (error) {
     return NextResponse.json(
-      {
-        detail: `Remote GPU runner request failed: ${String(error)}`
-      },
+      { detail: `Remote GPU stream request failed: ${String(error)}` },
       { status: 500 }
     );
   } finally {
@@ -230,8 +201,8 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ detail: "Unsupported video type." }, { status: 400 });
   }
 
-  if (REMOTE_GPU_RUN_URL) {
-    return forward_to_remote_gpu(file);
+  if (REMOTE_GPU_STREAM_URL) {
+    return forward_remote_stream(file);
   }
 
   await fs.mkdir(OUTPUTS_ROOT, { recursive: true });
@@ -262,7 +233,7 @@ export async function POST(request: Request): Promise<Response> {
     anomaly_rank: 1,
     quality: {},
     metadata: {
-      upload_source: "frontend_drag_drop"
+      upload_source: "frontend_stream"
     }
   };
   const manifest_row = {
@@ -274,7 +245,6 @@ export async function POST(request: Request): Promise<Response> {
   const flagged_path = path.resolve(OUTPUTS_ROOT, "flagged_windows.jsonl");
   const manifest_path = path.resolve(OUTPUTS_ROOT, "flagged_visuals", "manifest.jsonl");
   const suite_relative = "regression_suite.json";
-  const suite_path = path.resolve(OUTPUTS_ROOT, suite_relative);
 
   await fs.writeFile(flagged_path, `${JSON.stringify(flagged_row)}\n`, "utf-8");
   await fs.writeFile(manifest_path, `${JSON.stringify(manifest_row)}\n`, "utf-8");
@@ -301,60 +271,132 @@ export async function POST(request: Request): Promise<Response> {
     FAST_PROFILE_DEBATE_ROUNDS
   ];
 
-  const run = await run_process(python_bin, args, PROJECT_ROOT);
-  if (run.code !== 0) {
-    const stderr_tail = run.stderr.trim().slice(-2500);
-    const stdout_tail = run.stdout.trim().slice(-1200);
-    const detail = [
-      "Pipeline run failed.",
-      `python: ${python_bin}`,
-      stderr_tail ? `stderr: ${stderr_tail}` : "",
-      stdout_tail ? `stdout: ${stdout_tail}` : ""
-    ]
-      .filter((line) => line.length > 0)
-      .join("\n");
-    return NextResponse.json(
-      {
-        detail,
-        pythonBin: python_bin,
-        stdout: run.stdout.slice(-8000),
-        stderr: run.stderr.slice(-8000)
-      },
-      { status: 500 }
-    );
-  }
+  const encoder = new TextEncoder();
 
-  let reasoning_summary: unknown = null;
-  try {
-    const summary_text = await fs.readFile(path.resolve(OUTPUTS_ROOT, "reasoning", "summary.json"), "utf-8");
-    reasoning_summary = JSON.parse(summary_text);
-  } catch {
-    reasoning_summary = null;
-  }
-  const { latestReasoning, latestFlagged } = await load_latest_outputs(window_id);
-  if (latestReasoning && is_mock_model_source(latestReasoning.modelSource)) {
-    return NextResponse.json(
-      {
-        detail:
-          "Run completed but returned mock output. Real scene description is required. " +
-          "Sync latest pipeline files to remote and re-run.",
-        latestReasoning,
-        latestFlagged
-      },
-      { status: 500 }
-    );
-  }
+  const stream = new ReadableStream({
+    start(controller) {
+      const child = spawn(python_bin, args, {
+        cwd: PROJECT_ROOT,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: "1",
+          COSMOS_HF_VIDEO_FPS: FAST_PROFILE_VIDEO_FPS,
+          COSMOS_HF_MAX_NEW_TOKENS: FAST_PROFILE_MAX_NEW_TOKENS
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
 
-  return NextResponse.json({
-    ok: true,
-    windowId: window_id,
-    videoPath: relative_video_path,
-    stdout: run.stdout.slice(-4000),
-    stderr: run.stderr.slice(-4000),
-    reasoningSummary: reasoning_summary,
-    latestReasoning,
-    latestFlagged,
-    message: "Video uploaded and description/debate pipeline completed."
+      let pending = "";
+      let stdout_log = "";
+
+      const send_json = (obj: unknown) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      };
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        const s = chunk.toString("utf-8");
+        stdout_log += s;
+        pending += s;
+        let nl: number;
+        while ((nl = pending.indexOf("\n")) >= 0) {
+          const line = pending.slice(0, nl).replace(/\r$/, "");
+          pending = pending.slice(nl + 1);
+          if (line.startsWith(PIPELINE_PROGRESS_PREFIX)) {
+            const raw = line.slice(PIPELINE_PROGRESS_PREFIX.length);
+            try {
+              const payload = JSON.parse(raw) as Record<string, unknown>;
+              send_json({ kind: "progress", payload });
+            } catch {
+              /* skip malformed line */
+            }
+          }
+        }
+      });
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stdout_log += chunk.toString("utf-8");
+      });
+
+      child.on("error", (err) => {
+        send_json({ kind: "error", detail: String(err), code: -1 });
+        controller.close();
+      });
+
+      child.on("close", (code) => {
+        void (async () => {
+          if (pending.trim().length > 0) {
+            for (const line of pending.split("\n")) {
+              if (line.startsWith(PIPELINE_PROGRESS_PREFIX)) {
+                try {
+                  const payload = JSON.parse(line.slice(PIPELINE_PROGRESS_PREFIX.length)) as Record<string, unknown>;
+                  send_json({ kind: "progress", payload });
+                } catch {
+                  /* skip */
+                }
+              }
+            }
+          }
+
+          if (code !== 0) {
+            send_json({
+              kind: "error",
+              code,
+              detail: "Pipeline run failed.",
+              logTail: stdout_log.slice(-12000)
+            });
+            controller.close();
+            return;
+          }
+
+          let reasoning_summary: unknown = null;
+          try {
+            const summary_text = await fs.readFile(
+              path.resolve(OUTPUTS_ROOT, "reasoning", "summary.json"),
+              "utf-8"
+            );
+            reasoning_summary = JSON.parse(summary_text);
+          } catch {
+            reasoning_summary = null;
+          }
+
+          const { latestReasoning, latestFlagged } = await load_latest_outputs(window_id);
+          if (latestReasoning && is_mock_model_source(latestReasoning.modelSource)) {
+            send_json({
+              kind: "error",
+              detail:
+                "Run completed but returned mock output. Real scene description is required. " +
+                "Sync latest pipeline files to remote and re-run.",
+              latestReasoning,
+              latestFlagged
+            });
+            controller.close();
+            return;
+          }
+
+          send_json({
+            kind: "complete",
+            ok: true,
+            windowId: window_id,
+            videoPath: relative_video_path,
+            message: "Video uploaded and description/debate pipeline completed.",
+            reasoningSummary: reasoning_summary,
+            latestReasoning,
+            latestFlagged,
+            stdout: stdout_log.slice(-4000),
+            stderr: ""
+          });
+          controller.close();
+        })();
+      });
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    }
   });
 }
-

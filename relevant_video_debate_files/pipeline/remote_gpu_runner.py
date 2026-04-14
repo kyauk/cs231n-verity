@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -13,8 +14,10 @@ from typing import Any
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
+# Must match pipeline.stage_describe_and_debate.PROGRESS_PREFIX for stream parsing.
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs"
@@ -233,6 +236,7 @@ def run_pipeline_command(args: list[str], env_overrides: dict[str, str]) -> tupl
 
     merged_env = dict(os.environ)
     merged_env.update(env_overrides)
+    merged_env.setdefault("PYTHONUNBUFFERED", "1")
     completed = subprocess.run(
         args,
         cwd=str(PROJECT_ROOT),
@@ -334,6 +338,7 @@ async def run_video(video: UploadFile = File(...)) -> JSONResponse:
     code, stdout, stderr = run_pipeline_command(
         [
             sys.executable,
+            "-u",
             "-m",
             "pipeline.stage_describe_and_debate",
             "--flagged-jsonl",
@@ -400,5 +405,162 @@ async def run_video(video: UploadFile = File(...)) -> JSONResponse:
             "latestFlagged": latest_flagged,
             "message": "Video uploaded and description/debate pipeline completed on remote GPU.",
         }
+    )
+
+
+@app.post("/run-video-stream")
+async def run_video_stream(video: UploadFile = File(...)) -> StreamingResponse:
+    """
+    Same pipeline as /run-video but streams Server-Sent Events with structured progress lines.
+    Each event: data: {"kind":"progress","payload":{"step","title","detail"}}
+    Final success: {"kind":"complete", ...} ; failure: {"kind":"error", ...}
+    """
+
+    def error_stream(message: str, code: int = 400) -> StreamingResponse:
+        async def gen() -> Any:
+            yield f"data: {json.dumps({'kind': 'error', 'detail': message, 'code': code})}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream", status_code=code)
+
+    extension = Path(video.filename or "").suffix.lower()
+    if extension not in {".mp4", ".mov", ".mkv", ".avi", ".webm"}:
+        return error_stream("Unsupported video type.", 400)
+
+    OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
+    (OUTPUTS_ROOT / "flagged_visuals").mkdir(parents=True, exist_ok=True)
+    (OUTPUTS_ROOT / "reasoning").mkdir(parents=True, exist_ok=True)
+    INPUTS_ROOT.mkdir(parents=True, exist_ok=True)
+
+    timestamp = int(time.time() * 1000)
+    safe_name = sanitize_filename(video.filename or f"upload{extension}")
+    stored_name = f"upload_{timestamp}_{safe_name}"
+    absolute_video_path = INPUTS_ROOT / stored_name
+    relative_video_path = f"inputs/{stored_name}"
+
+    file_bytes = await video.read()
+    absolute_video_path.write_bytes(file_bytes)
+
+    window_id = f"upload_window_{timestamp}"
+    flagged_row: dict[str, Any] = {
+        "window_id": window_id,
+        "scene_token_hex": f"upload_{timestamp}",
+        "log_id": "manual_upload",
+        "scenario_tags": ["manual_upload"],
+        "window_start_ts": 0,
+        "window_end_ts": 0,
+        "cluster_label": -1,
+        "is_noise": True,
+        "cluster_probability": 0.0,
+        "outlier_score": 0.9,
+        "anomaly_rank": 1,
+        "quality": {},
+        "metadata": {"upload_source": "remote_gpu_runner_stream"},
+    }
+    manifest_row = {"window_id": window_id, "grid_path": "", "mp4_path": relative_video_path}
+
+    (OUTPUTS_ROOT / "flagged_windows.jsonl").write_text(
+        json.dumps(flagged_row) + "\n",
+        encoding="utf-8",
+    )
+    (OUTPUTS_ROOT / "flagged_visuals" / "manifest.jsonl").write_text(
+        json.dumps(manifest_row) + "\n",
+        encoding="utf-8",
+    )
+    suite_path = ensure_default_regression_suite()
+
+    max_new_tokens = os.getenv("WORKSPACE_MAX_NEW_TOKENS", "2400")
+    debate_rounds = os.getenv("WORKSPACE_DEBATE_ROUNDS", "2")
+    video_fps = os.getenv("WORKSPACE_VIDEO_FPS", "8")
+
+    merged_env = dict(os.environ)
+    merged_env.update(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "COSMOS_HF_VIDEO_FPS": video_fps,
+        }
+    )
+
+    pipeline_args = [
+        sys.executable,
+        "-u",
+        "-m",
+        "pipeline.stage_describe_and_debate",
+        "--flagged-jsonl",
+        "outputs/flagged_windows.jsonl",
+        "--visual-manifest-jsonl",
+        "outputs/flagged_visuals/manifest.jsonl",
+        "--regression-suite-json",
+        str(suite_path.relative_to(PROJECT_ROOT)),
+        "--output-dir",
+        "outputs/reasoning",
+        "--hf-max-new-tokens",
+        max_new_tokens,
+        "--top-k",
+        "1",
+        "--debate-rounds",
+        debate_rounds,
+    ]
+
+    async def event_gen() -> Any:
+        proc = await asyncio.create_subprocess_exec(
+            *pipeline_args,
+            cwd=str(PROJECT_ROOT),
+            env=merged_env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        log_lines: list[str] = []
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip("\n\r")
+            log_lines.append(text)
+            if text.startswith(PIPELINE_PROGRESS_PREFIX):
+                body = text[len(PIPELINE_PROGRESS_PREFIX) :]
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    continue
+                yield f"data: {json.dumps({'kind': 'progress', 'payload': payload})}\n\n"
+
+        code = await proc.wait()
+        combined = "\n".join(log_lines)
+        if code != 0:
+            yield f"data: {json.dumps({'kind': 'error', 'code': code, 'detail': 'Pipeline run failed.', 'logTail': combined[-12000:]})}\n\n"
+            return
+
+        summary_path = OUTPUTS_ROOT / "reasoning" / "summary.json"
+        try:
+            reasoning_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            reasoning_summary = None
+        latest_reasoning, latest_flagged = load_latest_outputs(window_id)
+        if latest_reasoning and is_mock_model_source(latest_reasoning.get("modelSource")):
+            yield f"data: {json.dumps({'kind': 'error', 'detail': 'Run completed but returned mock output. Real scene description is required.', 'latestReasoning': latest_reasoning, 'latestFlagged': latest_flagged})}\n\n"
+            return
+
+        done_payload = {
+            "kind": "complete",
+            "ok": True,
+            "windowId": window_id,
+            "videoPath": relative_video_path,
+            "message": "Video uploaded and description/debate pipeline completed on remote GPU.",
+            "reasoningSummary": reasoning_summary,
+            "latestReasoning": latest_reasoning,
+            "latestFlagged": latest_flagged,
+            "stdout": combined[-4000:],
+        }
+        yield f"data: {json.dumps(done_payload)}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 

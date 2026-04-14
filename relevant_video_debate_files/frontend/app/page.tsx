@@ -2,8 +2,20 @@
 
 import { type DragEvent, useEffect, useMemo, useState } from "react";
 
-import { ApiError, fetch_workspace_snapshot, run_video_pipeline } from "@/lib/api";
-import type { WorkspaceSnapshotResponse } from "@/types/api";
+import { ApiError, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
+import type { PipelineProgressPayload, WorkspaceSnapshotResponse } from "@/types/api";
+
+type ProgressRow = {
+  key: string;
+  step: string;
+  title: string;
+  detail: string;
+  time_label: string;
+};
+
+function format_progress_time(): string {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
 export default function HomePage(): JSX.Element {
   const [workspace_snapshot, set_workspace_snapshot] = useState<WorkspaceSnapshotResponse | null>(null);
@@ -15,6 +27,20 @@ export default function HomePage(): JSX.Element {
   const [video_run_message, set_video_run_message] = useState<string | null>(null);
   const [video_run_error, set_video_run_error] = useState<string | null>(null);
   const [pipeline_stdout, set_pipeline_stdout] = useState<string>("");
+  const [progress_log, set_progress_log] = useState<ProgressRow[]>([]);
+
+  function append_progress(payload: PipelineProgressPayload): void {
+    set_progress_log((prev) => {
+      const row: ProgressRow = {
+        key: `${payload.step}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        step: payload.step,
+        title: payload.title,
+        detail: payload.detail,
+        time_label: format_progress_time()
+      };
+      return [...prev, row].slice(-40);
+    });
+  }
 
   async function load_workspace_snapshot(): Promise<void> {
     set_snapshot_loading(true);
@@ -114,8 +140,9 @@ export default function HomePage(): JSX.Element {
     set_video_run_error(null);
     set_video_run_message(null);
     set_pipeline_stdout("");
+    set_progress_log([]);
     try {
-      const response = await run_video_pipeline(video_file);
+      const response = await run_video_pipeline_stream(video_file, append_progress);
       set_video_run_message(response.message);
       set_pipeline_stdout(response.stdout || response.stderr || "");
       await load_workspace_snapshot();
@@ -185,7 +212,8 @@ export default function HomePage(): JSX.Element {
           <h2>Run From Video (Drag + Drop)</h2>
           <p>
             Drop a single video, run scene description + debate pipeline, and inspect outputs
-            immediately.
+            immediately. While the run is in progress, a live timeline appears below with each major
+            step (model load, scene description, debate rounds, save).
           </p>
         </div>
         <div
@@ -216,6 +244,31 @@ export default function HomePage(): JSX.Element {
             {video_run_loading ? "Running..." : "Run Description + Debate"}
           </button>
         </div>
+
+        {video_run_loading || progress_log.length > 0 ? (
+          <div className="pipeline-progress-panel" style={{ marginTop: 16 }} aria-live="polite">
+            <div className="pipeline-progress-header">
+              {video_run_loading ? "Pipeline progress" : "Last run timeline"}
+            </div>
+            <ul className="pipeline-progress-list">
+              {progress_log.map((row, index) => (
+                <li
+                  key={row.key}
+                  className={`pipeline-progress-row${
+                    video_run_loading && index === progress_log.length - 1 ? " is-active" : ""
+                  }`}
+                >
+                  <time dateTime={row.time_label}>{row.time_label}</time>
+                  <div>
+                    <div className="pipeline-progress-title">{row.title}</div>
+                    {row.detail ? <div className="pipeline-progress-detail">{row.detail}</div> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {pipeline_stdout ? (
           <pre className="run-log">{pipeline_stdout}</pre>
         ) : null}

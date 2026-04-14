@@ -81,3 +81,10 @@ export type RunVideoResponse = {
   latestFlagged: WorkspaceFlaggedItem | null;
   message: string;
 };
+
+/** Structured line from pipeline stdout (matches Python PIPELINE_PROGRESS payload). */
+export type PipelineProgressPayload = {
+  step: string;
+  title: string;
+  detail: string;
+};
