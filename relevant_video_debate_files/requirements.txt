@@ -6,6 +6,8 @@ python-dotenv
 requests
 Pillow
 torch
+torchvision
+av
 transformers
 accelerate
 sentencepiece

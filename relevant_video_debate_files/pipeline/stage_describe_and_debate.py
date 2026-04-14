@@ -221,10 +221,11 @@ def _hf_chat_completion(messages: list[dict[str, Any]]) -> str:
 
     try:
         import torch  # type: ignore[import-not-found]
+        import torchvision  # type: ignore[import-not-found]  # noqa: F401
         import transformers  # type: ignore[import-not-found]
     except Exception as error:  # noqa: BLE001
         raise RuntimeError(
-            "Description stage requires transformers and torch in current environment."
+            "Description stage requires transformers, torch, and torchvision in current environment."
         ) from error
 
     model_id = os.getenv("COSMOS_HF_MODEL_ID", "nvidia/Cosmos-Reason2-8B")
@@ -365,12 +366,51 @@ def _parse_strict_json_object(raw: str, stage_name: str) -> dict[str, Any]:
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text).strip()
 
+    def _extract_first_json_object(candidate: str) -> str | None:
+        start = candidate.find("{")
+        if start < 0:
+            return None
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(candidate)):
+            char = candidate[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+            if char == "{":
+                depth += 1
+                continue
+            if char == "}":
+                depth -= 1
+                if depth == 0:
+                    return candidate[start : idx + 1]
+        return None
+
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as error:
-        raise RuntimeError(
-            f"{stage_name} output must be strict JSON object. Raw head: {raw[:300]!r}"
-        ) from error
+        extracted = _extract_first_json_object(text)
+        if extracted is None:
+            raise RuntimeError(
+                f"{stage_name} output must be strict JSON object. Raw head: {raw[:300]!r}"
+            ) from error
+        try:
+            parsed = json.loads(extracted)
+        except json.JSONDecodeError as nested_error:
+            raise RuntimeError(
+                f"{stage_name} output must be strict JSON object. Raw head: {raw[:300]!r}"
+            ) from nested_error
 
     if not isinstance(parsed, dict):
         raise RuntimeError(f"{stage_name} output must be a JSON object.")
@@ -632,13 +672,11 @@ def main() -> int:
     description_inputs = _build_description_inputs(run_id, anomaly_rows, manifest_by_window)
 
     description_prompt = (
-    "You are an expert autonomous-driving scene-understanding model. "
-    "Analyze the provided media and follow this structure exactly:\n"
-    "1. <think>: Provide a step-by-step physical reasoning of the scene, "
-    "focusing on object trajectories, spatial relationships, and potential safety risks.\n"
-    "2. <answer>: Return ONLY a strict JSON object with these keys: "
-    "scene_description, anomaly_rationale, confidence (low|medium|high)."
-)
+        "You are an expert autonomous-driving scene-understanding model. "
+        "Analyze the provided media and return ONLY a strict JSON object. "
+        "Do not include markdown, tags, commentary, or chain-of-thought. "
+        "Required keys: scene_description, anomaly_rationale, confidence (low|medium|high)."
+    )
 
     description_outputs: list[SceneDescriptionOutputRecord] = []
     for record in description_inputs:

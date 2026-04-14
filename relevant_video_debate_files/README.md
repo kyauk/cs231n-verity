@@ -16,6 +16,10 @@ This folder contains a runnable subset for:
 
 Frontend is included and runnable (`frontend/` Next.js app + API routes).
 
+## Teammate handoff setup
+
+Use `TEAM_SETUP.md` for a from-scratch Brev GPU runbook, including terminal-by-terminal startup commands, port forwarding, and troubleshooting.
+
 ## Backend quick start (FastAPI upload endpoint)
 
 1) Create and activate a virtual environment:
