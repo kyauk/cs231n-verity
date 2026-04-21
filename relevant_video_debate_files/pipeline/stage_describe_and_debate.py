@@ -208,11 +208,15 @@ def _build_description_inputs(
     return results
 
 
-def _hf_chat_completion(messages: list[dict[str, Any]]) -> str:
+def _hf_chat_completion(
+    messages: list[dict[str, Any]],
+    max_new_tokens_override: int | None = None,
+) -> str:
     """
     Purpose: Run local HF chat completion for scene description.
     Parameters:
         messages (list[dict[str, Any]]): Role/content message list.
+        max_new_tokens_override (int | None): Override default token budget, used by retry logic.
     Returns:
         str: Generated text.
     Called by: main()
@@ -229,7 +233,7 @@ def _hf_chat_completion(messages: list[dict[str, Any]]) -> str:
         ) from error
 
     model_id = os.getenv("COSMOS_HF_MODEL_ID", "nvidia/Cosmos-Reason2-8B")
-    max_new_tokens = int(os.getenv("COSMOS_HF_MAX_NEW_TOKENS", "3200"))
+    max_new_tokens = max_new_tokens_override or int(os.getenv("COSMOS_HF_MAX_NEW_TOKENS", "3200"))
     video_fps = float(os.getenv("COSMOS_HF_VIDEO_FPS", "8"))
     dtype_name = os.getenv("COSMOS_HF_TORCH_DTYPE", "float16")
     dtype = getattr(torch, dtype_name, torch.float16)
@@ -417,9 +421,57 @@ def _parse_strict_json_object(raw: str, stage_name: str) -> dict[str, Any]:
     return parsed
 
 
+class DescriptionTruncatedError(RuntimeError):
+    """Raised when description generation output is incomplete (not valid JSON and no closing brace)."""
+
+
+def _looks_truncated(raw: str) -> bool:
+    """
+    Purpose: Heuristically detect if model output was cut off mid-JSON.
+    Parameters:
+        raw (str): Raw model output.
+    Returns:
+        bool: True when output appears truncated (unbalanced braces / unterminated string).
+    Called by: _parse_cosmos_description()
+    Calls: None
+    """
+
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped).strip()
+
+    if not stripped:
+        return True
+
+    if stripped.endswith("}"):
+        return False
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in stripped:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+
+    return in_string or depth > 0
+
+
 def _parse_cosmos_description(raw: str) -> dict[str, Any]:
     """
-    Purpose: Parse description output into normalized fields.
+    Purpose: Parse description output into the strict required schema.
     Parameters:
         raw (str): Raw model output.
     Returns:
@@ -427,17 +479,30 @@ def _parse_cosmos_description(raw: str) -> dict[str, Any]:
     Called by: main()
     Calls: _parse_strict_json_object()
     """
-    parsed = _parse_strict_json_object(raw, "Description stage")
+
+    try:
+        parsed = _parse_strict_json_object(raw, "Description stage")
+    except RuntimeError as error:
+        if _looks_truncated(raw):
+            raise DescriptionTruncatedError(
+                f"Description stage output appears truncated. Raw tail: {raw[-300:]!r}"
+            ) from error
+        raise
+
     required_keys = ("scene_description", "anomaly_rationale", "confidence")
     for key in required_keys:
         value = parsed.get(key)
         if not isinstance(value, str) or not value.strip():
             raise RuntimeError(f"Description stage output missing non-empty string key: {key}")
 
-    if parsed["confidence"] not in {"low", "medium", "high"}:
+    if parsed["confidence"].lower() not in {"low", "medium", "high"}:
         raise RuntimeError("Description stage confidence must be one of: low, medium, high")
 
-    return parsed
+    return {
+        "scene_description": parsed["scene_description"].strip(),
+        "anomaly_rationale": parsed["anomaly_rationale"].strip(),
+        "confidence": parsed["confidence"].strip().lower(),
+    }
 
 
 def _parse_cosmos_debate(raw: str) -> dict[str, Any]:
@@ -674,9 +739,19 @@ def main() -> int:
     description_prompt = (
         "You are an expert autonomous-driving scene-understanding model. "
         "Analyze the provided media and return ONLY a strict JSON object. "
-        "Do not include markdown, tags, commentary, or chain-of-thought. "
-        "Required keys: scene_description, anomaly_rationale, confidence (low|medium|high)."
+        "Do not include markdown fences, tags, commentary, or chain-of-thought. "
+        "Required schema (all values are strings): "
+        '{"scene_description": str, "anomaly_rationale": str, "confidence": "low"|"medium"|"high"}. '
+        "Keep scene_description under 120 words and anomaly_rationale under 80 words."
     )
+    corrective_prompt = (
+        "Your previous response was not valid JSON matching the required schema. "
+        "Return ONLY the JSON object with keys scene_description, anomaly_rationale, confidence. "
+        "No prose, no markdown, no commentary. Keep strings concise so the JSON closes within the token budget."
+    )
+
+    base_token_budget = int(os.getenv("COSMOS_HF_MAX_NEW_TOKENS", str(args.hf_max_new_tokens)))
+    max_parse_retries = int(os.getenv("DESCRIPTION_MAX_PARSE_RETRIES", "2"))
 
     description_outputs: list[SceneDescriptionOutputRecord] = []
     for record in description_inputs:
@@ -708,13 +783,52 @@ def main() -> int:
                 }
             )
 
-            raw_description = _hf_chat_completion(
-                messages=[
-                    {"role": "system", "content": description_prompt},
-                    {"role": "user", "content": media_blocks},
-                ]
-            )
-            parsed = _parse_cosmos_description(raw_description)
+            conversation: list[dict[str, Any]] = [
+                {"role": "system", "content": description_prompt},
+                {"role": "user", "content": media_blocks},
+            ]
+
+            parsed: dict[str, Any] | None = None
+            last_error: Exception | None = None
+            token_budget = base_token_budget
+
+            for attempt in range(max_parse_retries + 1):
+                raw_description = _hf_chat_completion(
+                    messages=conversation,
+                    max_new_tokens_override=token_budget,
+                )
+                try:
+                    parsed = _parse_cosmos_description(raw_description)
+                    break
+                except DescriptionTruncatedError as error:
+                    last_error = error
+                    print(
+                        f"Description attempt {attempt + 1} truncated; "
+                        f"retrying with larger token budget.",
+                        flush=True,
+                    )
+                    token_budget = min(token_budget * 2, 8192)
+                    conversation = [
+                        {"role": "system", "content": description_prompt},
+                        {"role": "user", "content": media_blocks},
+                        {"role": "assistant", "content": raw_description},
+                        {"role": "user", "content": corrective_prompt},
+                    ]
+                except RuntimeError as error:
+                    last_error = error
+                    print(
+                        f"Description attempt {attempt + 1} invalid: {error}; re-prompting.",
+                        flush=True,
+                    )
+                    conversation = [
+                        {"role": "system", "content": description_prompt},
+                        {"role": "user", "content": media_blocks},
+                        {"role": "assistant", "content": raw_description},
+                        {"role": "user", "content": corrective_prompt},
+                    ]
+
+            if parsed is None:
+                raise last_error or RuntimeError("Description stage failed after retries.")
 
             description_outputs.append(
                 SceneDescriptionOutputRecord(
@@ -722,8 +836,8 @@ def main() -> int:
                     window_id=record.window_id,
                     scene_token_hex=record.scene_token_hex,
                     log_id=record.log_id,
-                    scene_description=parsed["scene_description"].strip(),
-                    anomaly_rationale=parsed["anomaly_rationale"].strip(),
+                    scene_description=parsed["scene_description"],
+                    anomaly_rationale=parsed["anomaly_rationale"],
                     confidence=parsed["confidence"],
                     model_source="cosmos_reason2",
                     media_refs=record.media_refs,

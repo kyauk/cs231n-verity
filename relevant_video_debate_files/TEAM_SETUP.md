@@ -57,6 +57,9 @@ Then run:
 cd ~/relevant_video_debate_files
 python3 -m venv .venv
 source .venv/bin/activate
+# Install CUDA 12.4 wheels so torchvision keeps video decode helpers.
+python -m pip install --upgrade pip
+python -m pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1
 pip install -r requirements.txt
 
 export NVIDIA_API_KEY="YOUR_NVIDIA_API_KEY"
