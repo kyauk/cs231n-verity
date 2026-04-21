@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from dotenv import load_dotenv
 
 # Must match pipeline.stage_describe_and_debate.PROGRESS_PREFIX for stream parsing.
 PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
@@ -22,6 +23,8 @@ PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs"
 INPUTS_ROOT = PROJECT_ROOT / "inputs"
+# Override any stale shell values (including empty strings) with project .env values.
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 
 def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:

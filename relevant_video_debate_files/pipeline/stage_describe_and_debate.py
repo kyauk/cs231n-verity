@@ -19,6 +19,7 @@ from pipeline.models.handoff_contracts import (
     SceneDescriptionInputRecord,
     SceneDescriptionOutputRecord,
 )
+from pipeline.debate_actors import run_tool_augmented_debate
 
 PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 
@@ -979,9 +980,10 @@ def main() -> int:
 
     debate_inputs = [build_debate_input(record, regression_suite) for record in description_outputs]
     debate_outputs: list[DebateOutputRecord] = []
-    for record in debate_inputs:
+    for record, desc_out in zip(debate_inputs, description_outputs):
         try:
-            debate_outputs.append(cosmos_multi_agent_debate(record, args.debate_rounds))
+            debate_output, _proposal_meta = run_tool_augmented_debate(record, desc_out.media_refs)
+            debate_outputs.append(debate_output)
         except Exception as error:  # noqa: BLE001
             print(f"COSMOS_BLOCKED: true during debate stage: {error}")
             return 1
