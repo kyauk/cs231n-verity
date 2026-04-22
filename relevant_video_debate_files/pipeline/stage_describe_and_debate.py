@@ -714,7 +714,7 @@ def cosmos_multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateO
                         f"Window ID: {record.window_id}\n"
                         f"Severity hint: {record.severity_hint}\n\n"
                         f"Scenario:\n{record.scene_description}\n\n"
-                        f"Anomaly rationale:\n{record.anomaly_rationale}\n\n"
+                        f"Regression-value rationale:\n{record.anomaly_rationale}\n\n"
                         f"Existing suite:\n{suite_text}\n\n"
                         f"Latest critic argument:\n{latest_critic}\n\n"
                         f"Full transcript so far:\n{transcript_so_far}"
@@ -860,11 +860,20 @@ def main() -> int:
         "Do not include markdown fences, tags, commentary, or chain-of-thought. "
         "Required schema (all values are strings): "
         '{"scene_description": str, "anomaly_rationale": str, "confidence": "low"|"medium"|"high"}. '
-        "Keep scene_description under 120 words and anomaly_rationale under 80 words."
+        "Field meanings: scene_description is a concise factual summary of what is visible. "
+        "The key anomaly_rationale is required by the API only: its CONTENT must explain why "
+        "this real-world clip is a valuable edge case for autonomous vehicle regression testing "
+        "(causal chain, rare interaction, challenging ODD, or safety-relevant ambiguity worth "
+        "a test engineer's review). Never claim the footage is fake, synthetic, a glitch, or "
+        "unrealistic physics; treat everything as a real driving event to characterize. "
+        "confidence is low|medium|high for your confidence in scene_description plus that rationale. "
+        "Keep scene_description under 120 words; keep the anomaly_rationale string under 80 words."
     )
     corrective_prompt = (
         "Your previous response was not valid JSON matching the required schema. "
         "Return ONLY the JSON object with keys scene_description, anomaly_rationale, confidence. "
+        "anomaly_rationale must describe valuable edge-case value for AV regression testing "
+        "(real events only; no fake-footage or glitch theories). "
         "No prose, no markdown, no commentary. Keep strings concise so the JSON closes within the token budget."
     )
 

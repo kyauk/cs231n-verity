@@ -34,8 +34,8 @@ function build_scene_report_ticket(
   const turns = build_debate_turns(reasoning.debateHistory);
   const transcript = turns.length
     ? turns
-        .map((turn) => `[Round ${turn.round}] ${turn.role}: ${turn.content}`)
-        .join("\n\n")
+      .map((turn) => `[Round ${turn.round}] ${turn.role}: ${turn.content}`)
+      .join("\n\n")
     : "No debate transcript captured.";
 
   return [

@@ -29,8 +29,10 @@ class DebateContext:
         media_refs: Absolute/relative paths to the video and/or image files
             that describe the flagged window.
         scene_description: Scene summary from the description stage.
-        anomaly_rationale: Why the window was flagged, from description stage.
-        severity_hint: ``low|medium|high|critical`` hint from anomaly stage.
+        anomaly_rationale: Regression-value rationale from the description stage
+            (API field name; content describes edge-case value for AV testing).
+        severity_hint: ``low|medium|high|critical`` coarse hint from upstream
+            statistical scoring (not a judgment of recording authenticity).
         regression_suite: Existing regression-suite scenario strings.
         window_id: Identifier for the flagged window (used for logging).
         video_fps: Sampling FPS for video frames when querying the VLM.
@@ -320,9 +322,18 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
             "role": "system",
             "content": (
                 "You are a vision-language assistant answering targeted "
-                "follow-up questions about an autonomous-driving scene. "
-                "Answer concisely (<=80 words) grounded strictly in what you "
-                "can see. If the answer is not visually evident, say so."
+                "follow-up questions about a REAL recorded autonomous-driving "
+                "scene. The video is genuine fleet footage - do NOT speculate "
+                "about whether it is fake, edited, or staged. Do NOT explain "
+                "sudden motion, debris, or collisions as glitches, unrealistic "
+                "physics, or rendering errors; infer real-world causes or say "
+                "the precursor is not visible. Describe what you actually see: "
+                "agents (vehicles, pedestrians, cyclists, infrastructure), "
+                "their positions and trajectories, the likely cause of any "
+                "incident, and environmental conditions. "
+                "Answer concisely (<=80 words) grounded strictly in what is "
+                "visible. If a specific detail is not visually evident, say "
+                "so explicitly rather than guessing."
             ),
         },
         {"role": "user", "content": media_blocks},

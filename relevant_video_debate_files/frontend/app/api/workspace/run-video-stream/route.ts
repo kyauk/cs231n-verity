@@ -85,32 +85,32 @@ async function load_latest_outputs(window_id: string): Promise<{
   const latestReasoning =
     latest_debate && latest_description
       ? {
-          windowId: as_string(latest_debate.window_id),
-          sceneDescription: as_string(latest_description.scene_description, "Description pending."),
-          anomalyRationale: as_string(latest_description.anomaly_rationale, "Rationale pending."),
-          decision: as_string(latest_debate.decision, "no"),
-          recommendation: as_string(latest_debate.recommendation, "not_critical"),
-          priorityScore: as_number(latest_debate.priority_score, 0),
-          modelSource: as_string(latest_debate.model_source, "unknown"),
-          capabilityTag: as_string((latest_debate.metadata as JsonRow | undefined)?.capability_tag),
-          debateHistory: as_string_array((latest_debate.metadata as JsonRow | undefined)?.debate_history),
-          judgeRawOutput: as_string((latest_debate.metadata as JsonRow | undefined)?.judge_raw_output)
-        }
+        windowId: as_string(latest_debate.window_id),
+        sceneDescription: as_string(latest_description.scene_description, "Description pending."),
+        anomalyRationale: as_string(latest_description.anomaly_rationale, "Rationale pending."),
+        decision: as_string(latest_debate.decision, "no"),
+        recommendation: as_string(latest_debate.recommendation, "not_critical"),
+        priorityScore: as_number(latest_debate.priority_score, 0),
+        modelSource: as_string(latest_debate.model_source, "unknown"),
+        capabilityTag: as_string((latest_debate.metadata as JsonRow | undefined)?.capability_tag),
+        debateHistory: as_string_array((latest_debate.metadata as JsonRow | undefined)?.debate_history),
+        judgeRawOutput: as_string((latest_debate.metadata as JsonRow | undefined)?.judge_raw_output)
+      }
       : null;
 
   const latestFlagged =
     latest_flagged_raw !== null
       ? {
-          windowId: as_string(latest_flagged_raw.window_id),
-          sceneTokenHex: as_string(latest_flagged_raw.scene_token_hex),
-          logId: as_string(latest_flagged_raw.log_id),
-          clusterLabel: as_number(latest_flagged_raw.cluster_label, -1),
-          isNoise: Boolean(latest_flagged_raw.is_noise),
-          outlierScore: as_number(latest_flagged_raw.outlier_score, 0),
-          anomalyRank: as_number(latest_flagged_raw.anomaly_rank, 0),
-          gridUrl: artifact_url(latest_manifest_raw?.grid_path),
-          mp4Url: artifact_url(latest_manifest_raw?.mp4_path)
-        }
+        windowId: as_string(latest_flagged_raw.window_id),
+        sceneTokenHex: as_string(latest_flagged_raw.scene_token_hex),
+        logId: as_string(latest_flagged_raw.log_id),
+        clusterLabel: as_number(latest_flagged_raw.cluster_label, -1),
+        isNoise: Boolean(latest_flagged_raw.is_noise),
+        outlierScore: as_number(latest_flagged_raw.outlier_score, 0),
+        anomalyRank: as_number(latest_flagged_raw.anomaly_rank, 0),
+        gridUrl: artifact_url(latest_manifest_raw?.grid_path),
+        mp4Url: artifact_url(latest_manifest_raw?.mp4_path)
+      }
       : null;
 
   return { latestReasoning, latestFlagged };

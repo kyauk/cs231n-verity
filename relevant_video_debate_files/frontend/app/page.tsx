@@ -254,9 +254,8 @@ export default function HomePage(): JSX.Element {
               {progress_log.map((row, index) => (
                 <li
                   key={row.key}
-                  className={`pipeline-progress-row${
-                    video_run_loading && index === progress_log.length - 1 ? " is-active" : ""
-                  }`}
+                  className={`pipeline-progress-row${video_run_loading && index === progress_log.length - 1 ? " is-active" : ""
+                    }`}
                 >
                   <time dateTime={row.time_label}>{row.time_label}</time>
                   <div>
