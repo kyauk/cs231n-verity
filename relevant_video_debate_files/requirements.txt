@@ -11,5 +11,6 @@ torchaudio==2.7.1
 av
 transformers
 accelerate
+bitsandbytes
 sentencepiece
 einops

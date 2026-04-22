@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hf-max-new-tokens",
         type=int,
-        default=3200,
+        default=4096,
         help="Max generated tokens for scene-description model.",
     )
     parser.add_argument(
@@ -277,6 +277,7 @@ def _hf_chat_completion(
     video_fps = float(os.getenv("COSMOS_HF_VIDEO_FPS", "8"))
     dtype_name = os.getenv("COSMOS_HF_TORCH_DTYPE", "float16")
     dtype = getattr(torch, dtype_name, torch.float16)
+    quantization = os.getenv("COSMOS_HF_QUANTIZATION", "").strip().lower()
 
     cache = getattr(_hf_chat_completion, "_cache", None)
     if cache is None or cache.get("model_id") != model_id:
@@ -285,20 +286,81 @@ def _hf_chat_completion(
             "Loading vision-language model",
             "Downloading or loading weights (first run is slower); please wait.",
         )
-        model = transformers.Qwen3VLForConditionalGeneration.from_pretrained(
+
+        load_kwargs: dict[str, Any] = {
+            "device_map": "auto",
+            "attn_implementation": "sdpa",
+            "trust_remote_code": True,
+        }
+
+        if quantization in {"int8", "8bit"}:
+            try:
+                from transformers import BitsAndBytesConfig  # type: ignore[import-not-found]
+            except Exception as error:  # noqa: BLE001
+                raise RuntimeError(
+                    "COSMOS_HF_QUANTIZATION=int8 requested but bitsandbytes/transformers "
+                    "quantization support is unavailable. Install with `pip install bitsandbytes`."
+                ) from error
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        elif quantization in {"int4", "4bit", "nf4"}:
+            try:
+                from transformers import BitsAndBytesConfig  # type: ignore[import-not-found]
+            except Exception as error:  # noqa: BLE001
+                raise RuntimeError(
+                    "COSMOS_HF_QUANTIZATION=int4 requested but bitsandbytes/transformers "
+                    "quantization support is unavailable. Install with `pip install bitsandbytes`."
+                ) from error
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_use_double_quant=True,
+            )
+        else:
+            load_kwargs["dtype"] = dtype
+
+        # Pick the right model class based on the checkpoint's config.
+        # MoE variants (e.g. Qwen3-VL-30B-A3B) use Qwen3VLMoeForConditionalGeneration;
+        # dense variants (e.g. Cosmos-Reason2-8B, Qwen3-VL-8B) use Qwen3VLForConditionalGeneration.
+        try:
+            config = transformers.AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        except Exception:  # noqa: BLE001
+            config = None
+
+        architectures = list(getattr(config, "architectures", []) or []) if config is not None else []
+        model_type = str(getattr(config, "model_type", "") or "") if config is not None else ""
+        is_moe_checkpoint = (
+            "moe" in model_type.lower()
+            or any("moe" in str(arch).lower() for arch in architectures)
+            or "a3b" in model_id.lower()
+        )
+
+        if is_moe_checkpoint and hasattr(transformers, "Qwen3VLMoeForConditionalGeneration"):
+            ModelClass = transformers.Qwen3VLMoeForConditionalGeneration  # type: ignore[attr-defined]
+            class_label = "Qwen3VLMoeForConditionalGeneration"
+        else:
+            ModelClass = transformers.Qwen3VLForConditionalGeneration
+            class_label = "Qwen3VLForConditionalGeneration"
+
+        print(
+            f"[pipeline] Loading {model_id} as {class_label} "
+            f"(moe={is_moe_checkpoint}, model_type={model_type!r})",
+            flush=True,
+        )
+
+        model = ModelClass.from_pretrained(
             model_id,
-            dtype=dtype,
-            device_map="auto",
-            attn_implementation="sdpa",
-            trust_remote_code=True,
+            **load_kwargs,
         )
         processor = transformers.AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
         cache = {"model_id": model_id, "model": model, "processor": processor}
         setattr(_hf_chat_completion, "_cache", cache)
+
+        quant_suffix = f" ({quantization})" if quantization else ""
         _emit_pipeline_progress(
             "model_ready",
             "Model ready",
-            f"{model_id} is loaded and ready for inference.",
+            f"{model_id}{quant_suffix} is loaded and ready for inference.",
         )
 
     model = cache["model"]
@@ -855,17 +917,41 @@ def main() -> int:
     description_inputs = _build_description_inputs(run_id, anomaly_rows, manifest_by_window)
 
     description_prompt = (
-        "You are an expert autonomous-driving scene-understanding model. "
-        "Analyze the provided media and return ONLY a strict JSON object. "
-        "Do not include markdown fences, tags, commentary, or chain-of-thought. "
-        "Required schema (all values are strings): "
-        '{"scene_description": str, "anomaly_rationale": str, "confidence": "low"|"medium"|"high"}. '
-        "Keep scene_description under 120 words and anomaly_rationale under 80 words."
+        "You are an expert autonomous-driving (AV) scene-understanding model analyzing a short "
+        "dash-cam style video clip from an ego vehicle, plus optional auxiliary frames. "
+        "Your goal is a precise, evidence-grounded description a safety engineer can trust.\n\n"
+        "Observe the clip along these axes BEFORE writing (internally, not in the output):\n"
+        "  1. Environment & context: road type (highway / urban / intersection / parking / rural), "
+        "     lane configuration, weather, lighting / time-of-day, visibility, road surface condition.\n"
+        "  2. Ego behavior: implied speed, lane position, maneuvers visible across frames "
+        "     (braking, accelerating, turning, lane change, stopping).\n"
+        "  3. Other road users: vehicles (type, position relative to ego, motion), "
+        "     vulnerable road users (pedestrians, cyclists, scooters), approximate counts and trajectories.\n"
+        "  4. Traffic controls & infrastructure: signs, signals (state), lane markings, crosswalks, "
+        "     construction, cones, emergency vehicles, debris.\n"
+        "  5. Temporal dynamics: what CHANGES across the clip \u2014 new actors entering, occlusions, "
+        "     sudden motions, interactions between actors, ego response.\n"
+        "  6. Salient or rare elements that could explain why this clip was flagged as anomalous.\n\n"
+        "Use the anomaly signals provided in the user payload (cluster_label, is_noise, outlier_score, "
+        "scenario_tags) as PRIORS to direct your attention \u2014 then verify or refute them from the video.\n\n"
+        "Writing rules:\n"
+        "  - scene_description: up to 400 words. Concrete, temporally ordered (\"At start \u2026 around mid-clip \u2026 "
+        "    near the end \u2026\"), with rough spatial anchors (left / right / ahead / oncoming, near / far). "
+        "    Name specific actor types and visible attributes. Avoid vague words like \"something\" or "
+        "    \"unusual thing\" without a referent. Do NOT hallucinate speeds, plate numbers, or unseen context.\n"
+        "  - anomaly_rationale: up to 200 words. Explicitly link 1\u20133 observed phenomena to why the clip "
+        "    is out-of-distribution for a typical AV log. Reference the anomaly signals when relevant. "
+        "    If you believe the flag is a false positive, say so and justify.\n"
+        "  - confidence: \"low\" | \"medium\" | \"high\" based on visibility, clip length, and how "
+        "    directly the evidence supports your claims.\n\n"
+        "Output ONLY a strict JSON object matching this schema (no markdown fences, no tags, no prose):\n"
+        '{"scene_description": str, "anomaly_rationale": str, "confidence": "low"|"medium"|"high"}'
     )
     corrective_prompt = (
         "Your previous response was not valid JSON matching the required schema. "
         "Return ONLY the JSON object with keys scene_description, anomaly_rationale, confidence. "
-        "No prose, no markdown, no commentary. Keep strings concise so the JSON closes within the token budget."
+        "No prose, no markdown, no commentary. Keep scene_description within 400 words and "
+        "anomaly_rationale within 200 words so the JSON closes within the token budget."
     )
 
     base_token_budget = int(os.getenv("COSMOS_HF_MAX_NEW_TOKENS", str(args.hf_max_new_tokens)))
@@ -889,20 +975,22 @@ def main() -> int:
                 elif lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
                     media_blocks.append({"type": "image", "image": abs_path})
 
+            anomaly_priors = {
+                "window_id": record.window_id,
+                "scene_token_hex": record.scene_token_hex,
+                "log_id": record.log_id,
+                "scenario_tags": record.scenario_tags,
+                "cluster_label": record.cluster_label,
+                "is_noise": record.is_noise,
+                "outlier_score": record.outlier_score,
+                "anomaly_rank": record.anomaly_rank,
+            }
             media_blocks.append(
                 {
                     "type": "text",
-                    "text": json.dumps(
-                        {
-                            "window_id": record.window_id,
-                            "scene_token_hex": record.scene_token_hex,
-                            "log_id": record.log_id,
-                            "scenario_tags": record.scenario_tags,
-                            "cluster_label": record.cluster_label,
-                            "is_noise": record.is_noise,
-                            "outlier_score": record.outlier_score,
-                            "anomaly_rank": record.anomaly_rank,
-                        }
+                    "text": (
+                        "Anomaly signals for this clip (use as priors, verify against the video):\n"
+                        + json.dumps(anomaly_priors, indent=2)
                     ),
                 }
             )
