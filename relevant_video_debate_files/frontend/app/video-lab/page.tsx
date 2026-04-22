@@ -3,7 +3,37 @@
 import { useState } from "react";
 
 import { ApiError, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
-import type { PipelineProgressPayload, WorkspaceFlaggedItem, WorkspaceReasoningItem } from "@/types/api";
+import type {
+  PipelineProgressPayload,
+  RegressionCaseProposal,
+  WorkspaceFlaggedItem,
+  WorkspaceReasoningItem
+} from "@/types/api";
+
+function decision_chip_class(decision: RegressionCaseProposal["decision"]): string {
+  switch (decision) {
+    case "add_to_suite":
+      return "severity-low";
+    case "monitor":
+      return "severity-medium";
+    case "dismiss":
+    default:
+      return "severity-unknown";
+  }
+}
+
+function risk_chip_class(risk: RegressionCaseProposal["riskLevel"]): string {
+  switch (risk) {
+    case "critical":
+    case "high":
+      return "severity-high";
+    case "medium":
+      return "severity-medium";
+    case "low":
+    default:
+      return "severity-low";
+  }
+}
 
 type DebateTurn = {
   round: number;
@@ -29,7 +59,8 @@ function build_debate_turns(history: string[]): DebateTurn[] {
 
 function build_scene_report_ticket(
   reasoning: WorkspaceReasoningItem,
-  flagged: WorkspaceFlaggedItem | null
+  flagged: WorkspaceFlaggedItem | null,
+  proposal: RegressionCaseProposal | null
 ): string {
   const turns = build_debate_turns(reasoning.debateHistory);
   const transcript = turns.length
@@ -38,7 +69,7 @@ function build_scene_report_ticket(
       .join("\n\n")
     : "No debate transcript captured.";
 
-  return [
+  const lines: string[] = [
     `Title: Edge-Case Review - ${reasoning.windowId}`,
     "",
     "Summary:",
@@ -63,13 +94,61 @@ function build_scene_report_ticket(
     transcript,
     "",
     "Judge Raw Output:",
-    reasoning.judgeRawOutput || "No raw judge output captured.",
+    reasoning.judgeRawOutput || "No raw judge output captured."
+  ];
+
+  if (proposal) {
+    lines.push(
+      "",
+      "Structured Proposal:",
+      `- Case ID: ${proposal.caseId}`,
+      `- Proposal Decision: ${proposal.decision}`,
+      `- Risk Level: ${proposal.riskLevel.toUpperCase()}`,
+      `- Affected Capability: ${proposal.affectedCapability || "unspecified"}`,
+      `- ODD Conditions: ${proposal.affectedOdds.length ? proposal.affectedOdds.join(", ") : "n/a"}`,
+      `- Confidence: ${(proposal.confidence * 100).toFixed(1)}%`,
+      "",
+      "Failure Mode:",
+      proposal.failureMode,
+      "",
+      "Why Valuable:",
+      proposal.whyAnomalous,
+      "",
+      "Evidence Summary:",
+      proposal.evidenceSummary,
+      "",
+      "Recommended Test Spec:",
+      proposal.recommendedTestSpec,
+      "",
+      "Scenario Variants:",
+      proposal.scenarioVariants.length
+        ? proposal.scenarioVariants.map((v) => `- ${v}`).join("\n")
+        : "- n/a",
+      "",
+      "Counterarguments:",
+      proposal.counterarguments.length
+        ? proposal.counterarguments.map((v) => `- ${v}`).join("\n")
+        : "- none raised",
+      "",
+      "Rebuttal Summary:",
+      proposal.rebuttalSummary || "n/a",
+      "",
+      "Uncertainty Factors:",
+      proposal.uncertaintyFactors.length
+        ? proposal.uncertaintyFactors.map((v) => `- ${v}`).join("\n")
+        : "- none flagged"
+    );
+  }
+
+  lines.push(
     "",
     "Proposed Action:",
     reasoning.decision === "yes"
       ? "Add this scenario to the regression suite and include weather/visibility variants."
       : "Keep as monitored anomaly and revisit after additional neighbor comparisons."
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 type ProgressRow = {
@@ -93,6 +172,7 @@ export default function VideoLabPage(): JSX.Element {
   const [reasoning_summary, set_reasoning_summary] = useState<Record<string, unknown> | null>(null);
   const [latest_reasoning, set_latest_reasoning] = useState<WorkspaceReasoningItem | null>(null);
   const [latest_flagged, set_latest_flagged] = useState<WorkspaceFlaggedItem | null>(null);
+  const [latest_proposal, set_latest_proposal] = useState<RegressionCaseProposal | null>(null);
   const [progress_log, set_progress_log] = useState<ProgressRow[]>([]);
 
   function append_progress(payload: PipelineProgressPayload): void {
@@ -121,6 +201,7 @@ export default function VideoLabPage(): JSX.Element {
     set_reasoning_summary(null);
     set_latest_reasoning(null);
     set_latest_flagged(null);
+    set_latest_proposal(null);
     try {
       const response = await run_video_pipeline_stream(video_file, append_progress);
       setStatus(response.message);
@@ -129,6 +210,7 @@ export default function VideoLabPage(): JSX.Element {
       if (response.latestReasoning || response.latestFlagged) {
         set_latest_reasoning(response.latestReasoning);
         set_latest_flagged(response.latestFlagged);
+        set_latest_proposal(response.latestProposal ?? null);
         return;
       }
 
@@ -142,8 +224,13 @@ export default function VideoLabPage(): JSX.Element {
         snapshot.flaggedItems.find((item) => item.windowId === response.windowId) ??
         snapshot.flaggedItems[0] ??
         null;
+      const proposal_item =
+        snapshot.proposals?.find((item) => item.windowId === response.windowId) ??
+        snapshot.proposals?.[0] ??
+        null;
       set_latest_reasoning(reasoning_item);
       set_latest_flagged(flagged_item);
+      set_latest_proposal(proposal_item);
     } catch (run_error) {
       if (run_error instanceof ApiError) {
         setError(`Run failed (${run_error.status}): ${run_error.message}`);
@@ -157,7 +244,9 @@ export default function VideoLabPage(): JSX.Element {
 
   const debate_turns = latest_reasoning ? build_debate_turns(latest_reasoning.debateHistory) : [];
   const scene_ticket =
-    latest_reasoning !== null ? build_scene_report_ticket(latest_reasoning, latest_flagged) : "";
+    latest_reasoning !== null
+      ? build_scene_report_ticket(latest_reasoning, latest_flagged, latest_proposal)
+      : "";
 
   return (
     <main className="video-lab-page">
@@ -266,6 +355,135 @@ export default function VideoLabPage(): JSX.Element {
               {"\n\n"}
               {scene_ticket}
             </div>
+          </div>
+        ) : null}
+
+        {latest_proposal ? (
+          <div className="video-card">
+            <div className="artifact-preview-header">
+              <strong>
+                Regression-Case Proposal: {latest_proposal.caseId || latest_proposal.windowId}
+              </strong>
+              <span
+                className={`severity-chip ${decision_chip_class(latest_proposal.decision)}`}
+              >
+                {latest_proposal.decision.replace(/_/g, " ")}
+              </span>
+            </div>
+
+            <div className="capsule-block">
+              <h4>Failure Mode &amp; Evidence</h4>
+              <p>
+                <strong>Failure mode: </strong>
+                {latest_proposal.failureMode}
+              </p>
+              <p>
+                <strong>Why this is valuable: </strong>
+                {latest_proposal.whyAnomalous}
+              </p>
+              <p>
+                <strong>Evidence summary: </strong>
+                {latest_proposal.evidenceSummary}
+              </p>
+            </div>
+
+            <div className="capsule-meta">
+              <div>
+                <strong>Risk level</strong>
+                <span
+                  className={`severity-chip ${risk_chip_class(latest_proposal.riskLevel)}`}
+                >
+                  {latest_proposal.riskLevel.toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <strong>Affected capability</strong>
+                <span className="tag">
+                  {latest_proposal.affectedCapability || "unspecified"}
+                </span>
+              </div>
+              <div>
+                <strong>ODD conditions</strong>
+                {latest_proposal.affectedOdds.length ? (
+                  <span className="tag-row">
+                    {latest_proposal.affectedOdds.map((odd, index) => (
+                      <span key={`odd-${index}`} className="tag">
+                        {odd}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span>n/a</span>
+                )}
+              </div>
+            </div>
+
+            <div className="capsule-block">
+              <h4>Counterarguments (Coverage Analyst)</h4>
+              {latest_proposal.counterarguments.length ? (
+                <ol>
+                  {latest_proposal.counterarguments.map((item, index) => (
+                    <li key={`cb-${index}`}>{item}</li>
+                  ))}
+                </ol>
+              ) : (
+                <p>No counterarguments raised.</p>
+              )}
+              {latest_proposal.rebuttalSummary ? (
+                <p>
+                  <strong>Rebuttal: </strong>
+                  {latest_proposal.rebuttalSummary}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="capsule-block">
+              <h4>Recommended Action</h4>
+              <p>
+                <strong>Test spec: </strong>
+                {latest_proposal.recommendedTestSpec}
+              </p>
+              {latest_proposal.scenarioVariants.length ? (
+                <p>
+                  <strong>Variants to also test: </strong>
+                  <span className="tag-row">
+                    {latest_proposal.scenarioVariants.map((variant, index) => (
+                      <span key={`var-${index}`} className="tag">
+                        {variant}
+                      </span>
+                    ))}
+                  </span>
+                </p>
+              ) : null}
+            </div>
+
+            <div className="capsule-meta">
+              <div>
+                <strong>Confidence</strong>
+                <span>{`${(latest_proposal.confidence * 100).toFixed(1)}%`}</span>
+              </div>
+              <div>
+                <strong>Uncertainty factors</strong>
+                {latest_proposal.uncertaintyFactors.length ? (
+                  <ul>
+                    {latest_proposal.uncertaintyFactors.map((item, index) => (
+                      <li key={`uf-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span>None flagged.</span>
+                )}
+              </div>
+            </div>
+
+            <details>
+              <summary>Debate transcript</summary>
+              <pre className="detailed-report">
+                {latest_proposal.debateTranscript.length
+                  ? latest_proposal.debateTranscript.join("\n")
+                  : "No transcript captured."}
+              </pre>
+            </details>
           </div>
         ) : null}
 

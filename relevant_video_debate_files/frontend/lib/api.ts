@@ -169,6 +169,7 @@ export async function run_video_pipeline_stream(
           reasoningSummary: (parsed.reasoningSummary as Record<string, unknown> | null) ?? null,
           latestReasoning: (parsed.latestReasoning as RunVideoResponse["latestReasoning"]) ?? null,
           latestFlagged: (parsed.latestFlagged as RunVideoResponse["latestFlagged"]) ?? null,
+          latestProposal: (parsed.latestProposal as RunVideoResponse["latestProposal"]) ?? null,
           message: String(parsed.message ?? "Done.")
         };
       }

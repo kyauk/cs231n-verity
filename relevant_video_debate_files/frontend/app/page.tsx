@@ -3,7 +3,36 @@
 import { type DragEvent, useEffect, useMemo, useState } from "react";
 
 import { ApiError, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
-import type { PipelineProgressPayload, WorkspaceSnapshotResponse } from "@/types/api";
+import type {
+  PipelineProgressPayload,
+  RegressionCaseProposal,
+  WorkspaceSnapshotResponse
+} from "@/types/api";
+
+function decision_chip_class(decision: RegressionCaseProposal["decision"]): string {
+  switch (decision) {
+    case "add_to_suite":
+      return "severity-low";
+    case "monitor":
+      return "severity-medium";
+    case "dismiss":
+    default:
+      return "severity-unknown";
+  }
+}
+
+function risk_chip_class(risk: RegressionCaseProposal["riskLevel"]): string {
+  switch (risk) {
+    case "critical":
+    case "high":
+      return "severity-high";
+    case "medium":
+      return "severity-medium";
+    case "low":
+    default:
+      return "severity-low";
+  }
+}
 
 type ProgressRow = {
   key: string;
@@ -82,6 +111,17 @@ export default function HomePage(): JSX.Element {
     }
     return (
       workspace_snapshot.reasoningItems.find(
+        (item) => item.windowId === selected_flagged_item.windowId
+      ) ?? null
+    );
+  }, [workspace_snapshot, selected_flagged_item]);
+
+  const selected_proposal = useMemo<RegressionCaseProposal | null>(() => {
+    if (!workspace_snapshot?.proposals?.length || !selected_flagged_item) {
+      return null;
+    }
+    return (
+      workspace_snapshot.proposals.find(
         (item) => item.windowId === selected_flagged_item.windowId
       ) ?? null
     );
@@ -406,6 +446,141 @@ export default function HomePage(): JSX.Element {
             </div>
             <pre className="detailed-report">{detailed_report_text}</pre>
           </section>
+
+          {selected_proposal ? (
+            <section className="section-card">
+              <div className="section-header">
+                <h2>Regression-Case Proposal</h2>
+                <p>
+                  Structured, review-ready proposal assembled from the four-actor tool-augmented
+                  debate. Scroll through each pane to validate before pushing to the suite.
+                </p>
+              </div>
+
+              <div className="artifact-preview-header">
+                <strong>{selected_proposal.caseId || selected_proposal.windowId}</strong>
+                <span
+                  className={`severity-chip ${decision_chip_class(selected_proposal.decision)}`}
+                >
+                  {selected_proposal.decision.replace(/_/g, " ")}
+                </span>
+              </div>
+
+              <div className="capsule-block">
+                <h3>Failure Mode &amp; Evidence</h3>
+                <p>
+                  <strong>Failure mode: </strong>
+                  {selected_proposal.failureMode}
+                </p>
+                <p>
+                  <strong>Why this is valuable: </strong>
+                  {selected_proposal.whyAnomalous}
+                </p>
+                <p>
+                  <strong>Evidence summary: </strong>
+                  {selected_proposal.evidenceSummary}
+                </p>
+              </div>
+
+              <div className="capsule-meta">
+                <div>
+                  <strong>Risk level</strong>
+                  <span
+                    className={`severity-chip ${risk_chip_class(selected_proposal.riskLevel)}`}
+                  >
+                    {selected_proposal.riskLevel.toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <strong>Affected capability</strong>
+                  <span className="tag">
+                    {selected_proposal.affectedCapability || "unspecified"}
+                  </span>
+                </div>
+                <div>
+                  <strong>ODD conditions</strong>
+                  {selected_proposal.affectedOdds.length ? (
+                    <span className="tag-row">
+                      {selected_proposal.affectedOdds.map((odd, index) => (
+                        <span key={`${odd}-${index}`} className="tag">
+                          {odd}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span>n/a</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="capsule-block">
+                <h3>Counterarguments (Coverage Analyst)</h3>
+                {selected_proposal.counterarguments.length ? (
+                  <ol>
+                    {selected_proposal.counterarguments.map((item, index) => (
+                      <li key={`counter-${index}`}>{item}</li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p>No counterarguments raised.</p>
+                )}
+                {selected_proposal.rebuttalSummary ? (
+                  <p>
+                    <strong>Rebuttal: </strong>
+                    {selected_proposal.rebuttalSummary}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="capsule-block">
+                <h3>Recommended Action</h3>
+                <p>
+                  <strong>Test spec: </strong>
+                  {selected_proposal.recommendedTestSpec}
+                </p>
+                {selected_proposal.scenarioVariants.length ? (
+                  <p>
+                    <strong>Variants to also test: </strong>
+                    <span className="tag-row">
+                      {selected_proposal.scenarioVariants.map((variant, index) => (
+                        <span key={`variant-${index}`} className="tag">
+                          {variant}
+                        </span>
+                      ))}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="capsule-meta">
+                <div>
+                  <strong>Confidence</strong>
+                  <span>{`${(selected_proposal.confidence * 100).toFixed(1)}%`}</span>
+                </div>
+                <div>
+                  <strong>Uncertainty factors</strong>
+                  {selected_proposal.uncertaintyFactors.length ? (
+                    <ul>
+                      {selected_proposal.uncertaintyFactors.map((item, index) => (
+                        <li key={`uncertain-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span>None flagged.</span>
+                  )}
+                </div>
+              </div>
+
+              <details>
+                <summary>Debate transcript</summary>
+                <pre className="detailed-report">
+                  {selected_proposal.debateTranscript.length
+                    ? selected_proposal.debateTranscript.join("\n")
+                    : "No transcript captured."}
+                </pre>
+              </details>
+            </section>
+          ) : null}
         </div>
       </div>
     </main>

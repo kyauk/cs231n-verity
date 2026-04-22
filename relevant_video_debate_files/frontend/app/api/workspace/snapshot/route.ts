@@ -63,6 +63,7 @@ export async function GET(): Promise<Response> {
   const visual_rows = await read_jsonl("flagged_visuals/manifest.jsonl");
   const debate_rows = await read_jsonl("reasoning/debate_outputs.jsonl");
   const description_rows = await read_jsonl("reasoning/description_outputs.jsonl");
+  const proposal_rows = await read_jsonl("reasoning/proposals.jsonl");
 
   const anomaly_summary = await read_json("anomaly_summary.json");
   const visual_summary = await read_json("flagged_visuals/summary.json");
@@ -115,12 +116,33 @@ export async function GET(): Promise<Response> {
     };
   });
 
+  const proposals = proposal_rows.map((row) => ({
+    caseId: as_string(row.case_id),
+    windowId: as_string(row.window_id),
+    generatedAt: as_string(row.generated_at),
+    failureMode: as_string(row.failure_mode),
+    whyAnomalous: as_string(row.why_anomalous),
+    evidenceSummary: as_string(row.evidence_summary),
+    riskLevel: as_string(row.risk_level, "low"),
+    affectedCapability: as_string(row.affected_capability),
+    affectedOdds: as_string_array(row.affected_odds),
+    counterarguments: as_string_array(row.counterarguments),
+    rebuttalSummary: as_string(row.rebuttal_summary),
+    decision: as_string(row.decision, "monitor"),
+    recommendedTestSpec: as_string(row.recommended_test_spec),
+    scenarioVariants: as_string_array(row.scenario_variants),
+    confidence: as_number(row.confidence, 0),
+    uncertaintyFactors: as_string_array(row.uncertainty_factors),
+    debateTranscript: as_string_array(row.debate_transcript)
+  }));
+
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
     flaggedItems: flagged_items,
     reasoningItems: reasoning_items,
     anomalySummary: anomaly_summary,
     visualSummary: visual_summary,
-    reasoningSummary: reasoning_summary
+    reasoningSummary: reasoning_summary,
+    proposals
   });
 }

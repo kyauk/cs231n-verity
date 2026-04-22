@@ -16,10 +16,12 @@ from pipeline.models.handoff_contracts import (
     AnomalyResultRecord,
     DebateInputRecord,
     DebateOutputRecord,
+    RegressionCaseProposal,
     SceneDescriptionInputRecord,
     SceneDescriptionOutputRecord,
 )
 from pipeline.debate_actors import run_tool_augmented_debate
+from pipeline.proposal_builder import build_proposal_from_debate_output
 
 PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 
@@ -1013,6 +1015,12 @@ def main() -> int:
     _write_jsonl(debate_inputs_path, [row.model_dump() for row in debate_inputs])
     _write_jsonl(debate_outputs_path, [row.model_dump() for row in debate_outputs])
 
+    proposals: list[RegressionCaseProposal] = [
+        build_proposal_from_debate_output(row, run_id) for row in debate_outputs
+    ]
+    proposals_path = os.path.join(args.output_dir, "proposals.jsonl")
+    _write_jsonl(proposals_path, [row.model_dump() for row in proposals])
+
     summary = {
         "run_id": run_id,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -1025,6 +1033,7 @@ def main() -> int:
         "description_outputs": description_outputs_path,
         "debate_inputs": debate_inputs_path,
         "debate_outputs": debate_outputs_path,
+        "proposals": proposals_path,
     }
 
     summary_path = os.path.join(args.output_dir, "summary.json")

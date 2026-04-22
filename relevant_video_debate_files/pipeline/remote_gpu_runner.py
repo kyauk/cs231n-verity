@@ -103,19 +103,23 @@ def _as_string_array(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str)]
 
 
-def load_latest_outputs(window_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def load_latest_outputs(
+    window_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     """
-    Purpose: Build latest structured reasoning + flagged payloads for the uploaded window.
+    Purpose: Build latest structured reasoning + flagged + proposal payloads for the uploaded window.
     Parameters:
         window_id (str): Window id emitted for current upload.
     Returns:
-        tuple[dict[str, Any] | None, dict[str, Any] | None]: latestReasoning, latestFlagged.
+        tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+            latestReasoning, latestFlagged, latestProposal.
     Called by: run_video()
     Calls: _read_jsonl_rows(), _as_string(), _as_number(), _as_string_array()
     """
 
     description_rows = _read_jsonl_rows(OUTPUTS_ROOT / "reasoning" / "description_outputs.jsonl")
     debate_rows = _read_jsonl_rows(OUTPUTS_ROOT / "reasoning" / "debate_outputs.jsonl")
+    proposal_rows = _read_jsonl_rows(OUTPUTS_ROOT / "reasoning" / "proposals.jsonl")
     flagged_rows = _read_jsonl_rows(OUTPUTS_ROOT / "flagged_windows.jsonl")
     manifest_rows = _read_jsonl_rows(OUTPUTS_ROOT / "flagged_visuals" / "manifest.jsonl")
 
@@ -169,7 +173,33 @@ def load_latest_outputs(window_id: str) -> tuple[dict[str, Any] | None, dict[str
             "mp4Url": _as_string((latest_manifest_raw or {}).get("mp4_path")) or None,
         }
 
-    return latest_reasoning, latest_flagged
+    latest_proposal_raw = next(
+        (row for row in reversed(proposal_rows) if _as_string(row.get("window_id")) == window_id),
+        None,
+    )
+    latest_proposal: dict[str, Any] | None = None
+    if latest_proposal_raw:
+        latest_proposal = {
+            "caseId": _as_string(latest_proposal_raw.get("case_id")),
+            "windowId": _as_string(latest_proposal_raw.get("window_id")),
+            "generatedAt": _as_string(latest_proposal_raw.get("generated_at")),
+            "failureMode": _as_string(latest_proposal_raw.get("failure_mode")),
+            "whyAnomalous": _as_string(latest_proposal_raw.get("why_anomalous")),
+            "evidenceSummary": _as_string(latest_proposal_raw.get("evidence_summary")),
+            "riskLevel": _as_string(latest_proposal_raw.get("risk_level"), "low"),
+            "affectedCapability": _as_string(latest_proposal_raw.get("affected_capability")),
+            "affectedOdds": _as_string_array(latest_proposal_raw.get("affected_odds")),
+            "counterarguments": _as_string_array(latest_proposal_raw.get("counterarguments")),
+            "rebuttalSummary": _as_string(latest_proposal_raw.get("rebuttal_summary")),
+            "decision": _as_string(latest_proposal_raw.get("decision"), "monitor"),
+            "recommendedTestSpec": _as_string(latest_proposal_raw.get("recommended_test_spec")),
+            "scenarioVariants": _as_string_array(latest_proposal_raw.get("scenario_variants")),
+            "confidence": _as_number(latest_proposal_raw.get("confidence"), 0.0),
+            "uncertaintyFactors": _as_string_array(latest_proposal_raw.get("uncertainty_factors")),
+            "debateTranscript": _as_string_array(latest_proposal_raw.get("debate_transcript")),
+        }
+
+    return latest_reasoning, latest_flagged, latest_proposal
 
 
 def is_mock_model_source(value: Any) -> bool:
@@ -382,7 +412,7 @@ async def run_video(video: UploadFile = File(...)) -> JSONResponse:
         reasoning_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         reasoning_summary = None
-    latest_reasoning, latest_flagged = load_latest_outputs(window_id)
+    latest_reasoning, latest_flagged, latest_proposal = load_latest_outputs(window_id)
     if latest_reasoning and is_mock_model_source(latest_reasoning.get("modelSource")):
         return JSONResponse(
             {
@@ -392,6 +422,7 @@ async def run_video(video: UploadFile = File(...)) -> JSONResponse:
                 ),
                 "latestReasoning": latest_reasoning,
                 "latestFlagged": latest_flagged,
+                "latestProposal": latest_proposal,
             },
             status_code=500,
         )
@@ -406,6 +437,7 @@ async def run_video(video: UploadFile = File(...)) -> JSONResponse:
             "reasoningSummary": reasoning_summary,
             "latestReasoning": latest_reasoning,
             "latestFlagged": latest_flagged,
+            "latestProposal": latest_proposal,
             "message": "Video uploaded and description/debate pipeline completed on remote GPU.",
         }
     )
@@ -539,9 +571,9 @@ async def run_video_stream(video: UploadFile = File(...)) -> StreamingResponse:
             reasoning_summary = json.loads(summary_path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             reasoning_summary = None
-        latest_reasoning, latest_flagged = load_latest_outputs(window_id)
+        latest_reasoning, latest_flagged, latest_proposal = load_latest_outputs(window_id)
         if latest_reasoning and is_mock_model_source(latest_reasoning.get("modelSource")):
-            yield f"data: {json.dumps({'kind': 'error', 'detail': 'Run completed but returned mock output. Real scene description is required.', 'latestReasoning': latest_reasoning, 'latestFlagged': latest_flagged})}\n\n"
+            yield f"data: {json.dumps({'kind': 'error', 'detail': 'Run completed but returned mock output. Real scene description is required.', 'latestReasoning': latest_reasoning, 'latestFlagged': latest_flagged, 'latestProposal': latest_proposal})}\n\n"
             return
 
         done_payload = {
@@ -553,6 +585,7 @@ async def run_video_stream(video: UploadFile = File(...)) -> StreamingResponse:
             "reasoningSummary": reasoning_summary,
             "latestReasoning": latest_reasoning,
             "latestFlagged": latest_flagged,
+            "latestProposal": latest_proposal,
             "stdout": combined[-4000:],
         }
         yield f"data: {json.dumps(done_payload)}\n\n"

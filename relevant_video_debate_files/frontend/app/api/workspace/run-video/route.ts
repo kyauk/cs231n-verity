@@ -66,12 +66,14 @@ async function read_jsonl_rows(path_from_outputs: string): Promise<JsonRow[]> {
 async function load_latest_outputs(window_id: string): Promise<{
   latestReasoning: JsonRow | null;
   latestFlagged: JsonRow | null;
+  latestProposal: JsonRow | null;
 }> {
-  const [description_rows, debate_rows, flagged_rows, manifest_rows] = await Promise.all([
+  const [description_rows, debate_rows, flagged_rows, manifest_rows, proposal_rows] = await Promise.all([
     read_jsonl_rows("reasoning/description_outputs.jsonl"),
     read_jsonl_rows("reasoning/debate_outputs.jsonl"),
     read_jsonl_rows("flagged_windows.jsonl"),
-    read_jsonl_rows("flagged_visuals/manifest.jsonl")
+    read_jsonl_rows("flagged_visuals/manifest.jsonl"),
+    read_jsonl_rows("reasoning/proposals.jsonl")
   ]);
 
   const latest_description =
@@ -81,6 +83,8 @@ async function load_latest_outputs(window_id: string): Promise<{
     [...flagged_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
   const latest_manifest_raw =
     [...manifest_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
+  const latest_proposal_raw =
+    [...proposal_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
 
   const latestReasoning =
     latest_debate && latest_description
@@ -113,7 +117,30 @@ async function load_latest_outputs(window_id: string): Promise<{
       }
       : null;
 
-  return { latestReasoning, latestFlagged };
+  const latestProposal =
+    latest_proposal_raw !== null
+      ? {
+        caseId: as_string(latest_proposal_raw.case_id),
+        windowId: as_string(latest_proposal_raw.window_id),
+        generatedAt: as_string(latest_proposal_raw.generated_at),
+        failureMode: as_string(latest_proposal_raw.failure_mode),
+        whyAnomalous: as_string(latest_proposal_raw.why_anomalous),
+        evidenceSummary: as_string(latest_proposal_raw.evidence_summary),
+        riskLevel: as_string(latest_proposal_raw.risk_level, "low"),
+        affectedCapability: as_string(latest_proposal_raw.affected_capability),
+        affectedOdds: as_string_array(latest_proposal_raw.affected_odds),
+        counterarguments: as_string_array(latest_proposal_raw.counterarguments),
+        rebuttalSummary: as_string(latest_proposal_raw.rebuttal_summary),
+        decision: as_string(latest_proposal_raw.decision, "monitor"),
+        recommendedTestSpec: as_string(latest_proposal_raw.recommended_test_spec),
+        scenarioVariants: as_string_array(latest_proposal_raw.scenario_variants),
+        confidence: as_number(latest_proposal_raw.confidence, 0),
+        uncertaintyFactors: as_string_array(latest_proposal_raw.uncertainty_factors),
+        debateTranscript: as_string_array(latest_proposal_raw.debate_transcript)
+      }
+      : null;
+
+  return { latestReasoning, latestFlagged, latestProposal };
 }
 
 function is_mock_model_source(value: unknown): boolean {
@@ -331,7 +358,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     reasoning_summary = null;
   }
-  const { latestReasoning, latestFlagged } = await load_latest_outputs(window_id);
+  const { latestReasoning, latestFlagged, latestProposal } = await load_latest_outputs(window_id);
   if (latestReasoning && is_mock_model_source(latestReasoning.modelSource)) {
     return NextResponse.json(
       {
@@ -339,7 +366,8 @@ export async function POST(request: Request): Promise<Response> {
           "Run completed but returned mock output. Real scene description is required. " +
           "Sync latest pipeline files to remote and re-run.",
         latestReasoning,
-        latestFlagged
+        latestFlagged,
+        latestProposal
       },
       { status: 500 }
     );
@@ -354,6 +382,7 @@ export async function POST(request: Request): Promise<Response> {
     reasoningSummary: reasoning_summary,
     latestReasoning,
     latestFlagged,
+    latestProposal,
     message: "Video uploaded and description/debate pipeline completed."
   });
 }

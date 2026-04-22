@@ -101,3 +101,35 @@ class DebateOutputRecord(BaseModel):
     rationale: str
     model_source: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RegressionCaseProposal(BaseModel):
+    """Structured regression-case proposal — rich output artifact."""
+
+    case_id: str
+    run_id: str
+    window_id: str
+    scene_token_hex: str
+    log_id: str
+    generated_at: str
+
+    failure_mode: str
+    why_anomalous: str
+    evidence_summary: str
+
+    risk_level: Literal["critical", "high", "medium", "low"]
+    affected_capability: str
+    affected_odds: list[str] = Field(default_factory=list)
+
+    counterarguments: list[str] = Field(default_factory=list)
+    rebuttal_summary: str = ""
+
+    decision: Literal["add_to_suite", "monitor", "dismiss"]
+    recommended_test_spec: str
+    scenario_variants: list[str] = Field(default_factory=list)
+    confidence: float
+    uncertainty_factors: list[str] = Field(default_factory=list)
+
+    debate_transcript: list[str] = Field(default_factory=list)
+    model_source: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)

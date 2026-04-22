@@ -61,6 +61,31 @@ export type WorkspaceReasoningItem = {
   judgeRawOutput: string;
 };
 
+export type RegressionCaseProposal = {
+  caseId: string;
+  windowId: string;
+  generatedAt: string;
+
+  failureMode: string;
+  whyAnomalous: string;
+  evidenceSummary: string;
+
+  riskLevel: "critical" | "high" | "medium" | "low";
+  affectedCapability: string;
+  affectedOdds: string[];
+
+  counterarguments: string[];
+  rebuttalSummary: string;
+
+  decision: "add_to_suite" | "monitor" | "dismiss";
+  recommendedTestSpec: string;
+  scenarioVariants: string[];
+  confidence: number;
+  uncertaintyFactors: string[];
+
+  debateTranscript: string[];
+};
+
 export type WorkspaceSnapshotResponse = {
   generatedAt: string;
   flaggedItems: WorkspaceFlaggedItem[];
@@ -68,6 +93,7 @@ export type WorkspaceSnapshotResponse = {
   anomalySummary: Record<string, unknown> | null;
   visualSummary: Record<string, unknown> | null;
   reasoningSummary: Record<string, unknown> | null;
+  proposals: RegressionCaseProposal[];
 };
 
 export type RunVideoResponse = {
@@ -79,6 +105,7 @@ export type RunVideoResponse = {
   reasoningSummary: Record<string, unknown> | null;
   latestReasoning: WorkspaceReasoningItem | null;
   latestFlagged: WorkspaceFlaggedItem | null;
+  latestProposal: RegressionCaseProposal | null;
   message: string;
 };
 
