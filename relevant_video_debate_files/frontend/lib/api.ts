@@ -4,6 +4,7 @@ import type {
   IngestFailureTicketRequest,
   IngestFailureTicketResponse,
   PipelineProgressPayload,
+  RunMetricsLogEntry,
   RunVideoResponse,
   WorkspaceSnapshotResponse
 } from "@/types/api";
@@ -84,6 +85,15 @@ export async function run_video_pipeline(video_file: File): Promise<RunVideoResp
     body: form_data
   });
   return parse_response<RunVideoResponse>(response);
+}
+
+export async function append_run_metrics_log(entry: RunMetricsLogEntry): Promise<void> {
+  const response = await fetch("/api/workspace/metrics-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry)
+  });
+  await parse_response<{ ok: boolean }>(response);
 }
 
 /**

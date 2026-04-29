@@ -115,3 +115,28 @@ export type PipelineProgressPayload = {
   title: string;
   detail: string;
 };
+
+export type RunMetricStatus = "queued" | "embedding" | "clustering" | "agent_debate" | "finalizing" | "success" | "failed";
+
+export type RunMetricsLogEntry = {
+  runId: string;
+  videoName: string;
+  status: RunMetricStatus;
+  startedAt: string;
+  firstUiResponseAt: string | null;
+  firstMeaningfulResultAt: string | null;
+  completedAt: string | null;
+  timeToFirstUiResponseSec: number | null;
+  firstMeaningfulResultSec: number | null;
+  totalRuntimeSec: number | null;
+  stageTimesSec: Record<string, number>;
+  progressUpdateCount: number;
+  error: string | null;
+  errorCategory: string | null;
+  agentToolFailureCounts: Record<string, number>;
+  userReviewActions: {
+    openedPreviousCaseCount: number;
+    openedReasoningDetailsCount: number;
+    viewedFinalProposalCount: number;
+  };
+};

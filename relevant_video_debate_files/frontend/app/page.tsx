@@ -2,10 +2,12 @@
 
 import { type DragEvent, useEffect, useMemo, useState } from "react";
 
-import { ApiError, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
+import { ApiError, append_run_metrics_log, fetch_workspace_snapshot, run_video_pipeline_stream } from "@/lib/api";
 import type {
   PipelineProgressPayload,
   RegressionCaseProposal,
+  RunMetricStatus,
+  RunMetricsLogEntry,
   WorkspaceSnapshotResponse
 } from "@/types/api";
 
@@ -46,6 +48,73 @@ function format_progress_time(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+type CaseRunSummary = {
+  runId: string;
+  videoName: string;
+  startedAt: string;
+  completedAt: string | null;
+  status: "success" | "failed";
+  message: string;
+  error: string | null;
+  runtimeSec: number | null;
+  firstUiSec: number | null;
+  progressLog: ProgressRow[];
+  snapshot: WorkspaceSnapshotResponse | null;
+  selectedWindowId: string | null;
+};
+
+function metric_status_label(status: RunMetricStatus): string {
+  return status.replace(/_/g, " ");
+}
+
+function derive_stage(step: string, title: string): RunMetricStatus {
+  const text = `${step} ${title}`.toLowerCase();
+  if (text.includes("embed")) {
+    return "embedding";
+  }
+  if (text.includes("cluster") || text.includes("anomaly")) {
+    return "clustering";
+  }
+  if (text.includes("final") || text.includes("save") || text.includes("proposal")) {
+    return "finalizing";
+  }
+  if (
+    text.includes("debate") ||
+    text.includes("describe") ||
+    text.includes("scene") ||
+    text.includes("agent")
+  ) {
+    return "agent_debate";
+  }
+  return "queued";
+}
+
+function classify_error_reason(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("timeout")) {
+    return "timeout";
+  }
+  if (normalized.includes("network") || normalized.includes("fetch")) {
+    return "network";
+  }
+  if (normalized.includes("mock")) {
+    return "mock_output";
+  }
+  if (normalized.includes("python") || normalized.includes("pipeline")) {
+    return "pipeline";
+  }
+  return "unknown";
+}
+
+function parse_tool_failures(message: string): Record<string, number> {
+  const lower = message.toLowerCase();
+  return {
+    vision_model: lower.includes("vision") ? 1 : 0,
+    risk_taxonomy: lower.includes("taxonomy") ? 1 : 0,
+    arbiter: lower.includes("arbiter") ? 1 : 0
+  };
+}
+
 export default function HomePage(): JSX.Element {
   const [workspace_snapshot, set_workspace_snapshot] = useState<WorkspaceSnapshotResponse | null>(null);
   const [snapshot_loading, set_snapshot_loading] = useState<boolean>(false);
@@ -57,6 +126,14 @@ export default function HomePage(): JSX.Element {
   const [video_run_error, set_video_run_error] = useState<string | null>(null);
   const [pipeline_stdout, set_pipeline_stdout] = useState<string>("");
   const [progress_log, set_progress_log] = useState<ProgressRow[]>([]);
+  const [case_history, set_case_history] = useState<CaseRunSummary[]>([]);
+  const [selected_case_id, set_selected_case_id] = useState<string | null>(null);
+  const [current_run_status, set_current_run_status] = useState<RunMetricStatus>("queued");
+  const [review_actions, set_review_actions] = useState<RunMetricsLogEntry["userReviewActions"]>({
+    openedPreviousCaseCount: 0,
+    openedReasoningDetailsCount: 0,
+    viewedFinalProposalCount: 0
+  });
 
   function append_progress(payload: PipelineProgressPayload): void {
     set_progress_log((prev) => {
@@ -69,6 +146,7 @@ export default function HomePage(): JSX.Element {
       };
       return [...prev, row].slice(-40);
     });
+    set_current_run_status(derive_stage(payload.step, payload.title));
   }
 
   async function load_workspace_snapshot(): Promise<void> {
@@ -92,43 +170,51 @@ export default function HomePage(): JSX.Element {
     void load_workspace_snapshot();
   }, []);
 
+  const selected_case = useMemo(
+    () => case_history.find((item) => item.runId === selected_case_id) ?? null,
+    [case_history, selected_case_id]
+  );
+
+  const active_snapshot = selected_case?.snapshot ?? workspace_snapshot;
+  const active_selected_window_id = selected_case?.selectedWindowId ?? selected_window_id;
+
   const selected_flagged_item = useMemo(() => {
-    if (!workspace_snapshot?.flaggedItems.length) {
+    if (!active_snapshot?.flaggedItems.length) {
       return null;
     }
-    if (!selected_window_id) {
-      return workspace_snapshot.flaggedItems[0];
+    if (!active_selected_window_id) {
+      return active_snapshot.flaggedItems[0];
     }
     return (
-      workspace_snapshot.flaggedItems.find((item) => item.windowId === selected_window_id) ??
-      workspace_snapshot.flaggedItems[0]
+      active_snapshot.flaggedItems.find((item) => item.windowId === active_selected_window_id) ??
+      active_snapshot.flaggedItems[0]
     );
-  }, [workspace_snapshot, selected_window_id]);
+  }, [active_snapshot, active_selected_window_id]);
 
   const selected_reasoning_item = useMemo(() => {
-    if (!workspace_snapshot?.reasoningItems.length || !selected_flagged_item) {
+    if (!active_snapshot?.reasoningItems.length || !selected_flagged_item) {
       return null;
     }
     return (
-      workspace_snapshot.reasoningItems.find(
+      active_snapshot.reasoningItems.find(
         (item) => item.windowId === selected_flagged_item.windowId
       ) ?? null
     );
-  }, [workspace_snapshot, selected_flagged_item]);
+  }, [active_snapshot, selected_flagged_item]);
 
   const selected_proposal = useMemo<RegressionCaseProposal | null>(() => {
-    if (!workspace_snapshot?.proposals?.length || !selected_flagged_item) {
+    if (!active_snapshot?.proposals?.length || !selected_flagged_item) {
       return null;
     }
     return (
-      workspace_snapshot.proposals.find(
+      active_snapshot.proposals.find(
         (item) => item.windowId === selected_flagged_item.windowId
       ) ?? null
     );
-  }, [workspace_snapshot, selected_flagged_item]);
+  }, [active_snapshot, selected_flagged_item]);
 
   const summary_text = useMemo(() => {
-    const summary = workspace_snapshot?.anomalySummary;
+    const summary = active_snapshot?.anomalySummary;
     if (!summary || typeof summary !== "object") {
       return "No anomaly summary loaded.";
     }
@@ -140,7 +226,7 @@ export default function HomePage(): JSX.Element {
         ? `${(summary.noise_ratio * 100).toFixed(1)}%`
         : "-";
     return `rows ${rows} | clusters ${clusters} | noise ${noise} (${noise_ratio})`;
-  }, [workspace_snapshot]);
+  }, [active_snapshot]);
 
   const detailed_report_text = useMemo(() => {
     if (!selected_flagged_item || !selected_reasoning_item) {
@@ -181,17 +267,173 @@ export default function HomePage(): JSX.Element {
     set_video_run_message(null);
     set_pipeline_stdout("");
     set_progress_log([]);
+    set_selected_case_id(null);
+    set_current_run_status("queued");
+    set_review_actions({
+      openedPreviousCaseCount: 0,
+      openedReasoningDetailsCount: 0,
+      viewedFinalProposalCount: 0
+    });
+    const run_started_at = new Date();
+    const run_started_ms = Date.now();
+    const run_id = `${run_started_at.toISOString()}-${Math.random().toString(36).slice(2, 7)}`;
+    let first_ui_response_ms: number | null = null;
+    let first_meaningful_result_ms: number | null = null;
+    let progress_count = 0;
+    let stage_started_at = run_started_ms;
+    let active_stage: RunMetricStatus = "queued";
+    const stage_times_ms: Record<string, number> = {
+      queued: 0,
+      embedding: 0,
+      clustering: 0,
+      agent_debate: 0,
+      finalizing: 0
+    };
     try {
-      const response = await run_video_pipeline_stream(video_file, append_progress);
+      const response = await run_video_pipeline_stream(video_file, (payload) => {
+        const now = Date.now();
+        if (first_ui_response_ms === null) {
+          first_ui_response_ms = now;
+        }
+        progress_count += 1;
+        const next_stage = derive_stage(payload.step, payload.title);
+        stage_times_ms[active_stage] = (stage_times_ms[active_stage] ?? 0) + (now - stage_started_at);
+        active_stage = next_stage;
+        stage_started_at = now;
+        if (
+          first_meaningful_result_ms === null &&
+          (next_stage === "clustering" || next_stage === "agent_debate" || payload.title.toLowerCase().includes("anomaly"))
+        ) {
+          first_meaningful_result_ms = now;
+        }
+        append_progress(payload);
+      });
+      const completed_ms = Date.now();
+      stage_times_ms[active_stage] = (stage_times_ms[active_stage] ?? 0) + (completed_ms - stage_started_at);
       set_video_run_message(response.message);
       set_pipeline_stdout(response.stdout || response.stderr || "");
-      await load_workspace_snapshot();
       set_selected_window_id(response.windowId);
+      set_current_run_status("success");
+      let refreshed_snapshot: WorkspaceSnapshotResponse | null = null;
+      try {
+        refreshed_snapshot = await fetch_workspace_snapshot();
+        set_workspace_snapshot(refreshed_snapshot);
+      } catch {
+        refreshed_snapshot = null;
+      }
+      const runtime_sec = (completed_ms - run_started_ms) / 1000;
+      const first_ui_sec = first_ui_response_ms === null ? null : (first_ui_response_ms - run_started_ms) / 1000;
+      const first_meaningful_sec =
+        first_meaningful_result_ms === null ? null : (first_meaningful_result_ms - run_started_ms) / 1000;
+      set_case_history((prev) => [
+        {
+          runId: run_id,
+          videoName: video_file.name,
+          startedAt: run_started_at.toISOString(),
+          completedAt: new Date(completed_ms).toISOString(),
+          status: "success",
+          message: response.message,
+          error: null,
+          runtimeSec: runtime_sec,
+          firstUiSec: first_ui_sec,
+          progressLog: [],
+          snapshot: refreshed_snapshot,
+          selectedWindowId: response.windowId
+        },
+        ...prev
+      ]);
+      const stage_times_sec = Object.fromEntries(
+        Object.entries(stage_times_ms)
+          .filter(([key]) => key !== "queued")
+          .map(([key, value]) => [key, Number((value / 1000).toFixed(3))])
+      );
+      try {
+        await append_run_metrics_log({
+          runId: run_id,
+          videoName: video_file.name,
+          status: "success",
+          startedAt: run_started_at.toISOString(),
+          firstUiResponseAt: first_ui_response_ms ? new Date(first_ui_response_ms).toISOString() : null,
+          firstMeaningfulResultAt: first_meaningful_result_ms
+            ? new Date(first_meaningful_result_ms).toISOString()
+            : null,
+          completedAt: new Date(completed_ms).toISOString(),
+          timeToFirstUiResponseSec: first_ui_sec,
+          firstMeaningfulResultSec: first_meaningful_sec,
+          totalRuntimeSec: runtime_sec,
+          stageTimesSec: stage_times_sec,
+          progressUpdateCount: progress_count,
+          error: null,
+          errorCategory: null,
+          agentToolFailureCounts: {
+            vision_model: 0,
+            risk_taxonomy: 0,
+            arbiter: 0
+          },
+          userReviewActions: review_actions
+        });
+      } catch {
+        /* metrics backup failure should not fail the run UI */
+      }
     } catch (error) {
+      const completed_ms = Date.now();
+      stage_times_ms[active_stage] = (stage_times_ms[active_stage] ?? 0) + (completed_ms - stage_started_at);
+      set_current_run_status("failed");
+      const message =
+        error instanceof ApiError ? `Run failed (${error.status}): ${error.message}` : "Run failed due to an unexpected error.";
       if (error instanceof ApiError) {
-        set_video_run_error(`Run failed (${error.status}): ${error.message}`);
+        set_video_run_error(message);
       } else {
-        set_video_run_error("Run failed due to an unexpected error.");
+        set_video_run_error(message);
+      }
+      const runtime_sec = (completed_ms - run_started_ms) / 1000;
+      const first_ui_sec = first_ui_response_ms === null ? null : (first_ui_response_ms - run_started_ms) / 1000;
+      set_case_history((prev) => [
+        {
+          runId: run_id,
+          videoName: video_file.name,
+          startedAt: run_started_at.toISOString(),
+          completedAt: new Date(completed_ms).toISOString(),
+          status: "failed",
+          message: "Run failed.",
+          error: message,
+          runtimeSec: runtime_sec,
+          firstUiSec: first_ui_sec,
+          progressLog: [],
+          snapshot: null,
+          selectedWindowId: null
+        },
+        ...prev
+      ]);
+      const stage_times_sec = Object.fromEntries(
+        Object.entries(stage_times_ms)
+          .filter(([key]) => key !== "queued")
+          .map(([key, value]) => [key, Number((value / 1000).toFixed(3))])
+      );
+      try {
+        await append_run_metrics_log({
+          runId: run_id,
+          videoName: video_file.name,
+          status: "failed",
+          startedAt: run_started_at.toISOString(),
+          firstUiResponseAt: first_ui_response_ms ? new Date(first_ui_response_ms).toISOString() : null,
+          firstMeaningfulResultAt: first_meaningful_result_ms
+            ? new Date(first_meaningful_result_ms).toISOString()
+            : null,
+          completedAt: new Date(completed_ms).toISOString(),
+          timeToFirstUiResponseSec: first_ui_sec,
+          firstMeaningfulResultSec:
+            first_meaningful_result_ms === null ? null : (first_meaningful_result_ms - run_started_ms) / 1000,
+          totalRuntimeSec: runtime_sec,
+          stageTimesSec: stage_times_sec,
+          progressUpdateCount: progress_count,
+          error: message,
+          errorCategory: classify_error_reason(message),
+          agentToolFailureCounts: parse_tool_failures(message),
+          userReviewActions: review_actions
+        });
+      } catch {
+        /* metrics backup failure should not fail the run UI */
       }
     } finally {
       set_video_run_loading(false);
@@ -206,6 +448,40 @@ export default function HomePage(): JSX.Element {
       set_video_run_error(null);
     }
   }
+
+  function on_new_input(): void {
+    set_video_file(null);
+    set_video_run_error(null);
+    set_video_run_message(null);
+    set_pipeline_stdout("");
+    set_progress_log([]);
+    set_current_run_status("queued");
+    set_selected_case_id(null);
+  }
+
+  const kpi_summary = useMemo(() => {
+    const total_runs = case_history.length;
+    const successful_runs = case_history.filter((item) => item.status === "success").length;
+    const runtime_values = case_history
+      .map((item) => item.runtimeSec)
+      .filter((value): value is number => typeof value === "number");
+    const first_response_values = case_history
+      .map((item) => item.firstUiSec)
+      .filter((value): value is number => typeof value === "number");
+    const avg_runtime = runtime_values.length
+      ? runtime_values.reduce((acc, value) => acc + value, 0) / runtime_values.length
+      : null;
+    const avg_first_response = first_response_values.length
+      ? first_response_values.reduce((acc, value) => acc + value, 0) / first_response_values.length
+      : null;
+    return {
+      totalRuns: total_runs,
+      successfulRuns: successful_runs,
+      failedRuns: total_runs - successful_runs,
+      avgRuntimeSec: avg_runtime,
+      avgFirstResponseSec: avg_first_response
+    };
+  }, [case_history]);
 
   return (
     <main className="workspace-page">
@@ -224,18 +500,50 @@ export default function HomePage(): JSX.Element {
 
       <section className="status-bar">
         <div className="status-tile">
+          <strong>Total Runs</strong>
+          <span className="status-value">{kpi_summary.totalRuns}</span>
+        </div>
+        <div className="status-tile">
+          <strong>Success Rate</strong>
+          <span className="status-value">
+            {kpi_summary.successfulRuns}/{kpi_summary.totalRuns}
+          </span>
+        </div>
+        <div className="status-tile">
+          <strong>Avg Runtime</strong>
+          <span className="status-value">
+            {kpi_summary.avgRuntimeSec === null ? "-" : `${kpi_summary.avgRuntimeSec.toFixed(1)}s`}
+          </span>
+        </div>
+        <div className="status-tile">
+          <strong>Avg First Response</strong>
+          <span className="status-value">
+            {kpi_summary.avgFirstResponseSec === null ? "-" : `${kpi_summary.avgFirstResponseSec.toFixed(2)}s`}
+          </span>
+        </div>
+        <div className="status-tile">
+          <strong>Current Status</strong>
+          <span className="status-value">
+            {video_run_loading ? metric_status_label(current_run_status) : "idle"}
+          </span>
+        </div>
+        <div className="status-tile">
+          <strong>Previous Cases Saved</strong>
+          <span className="status-value">{case_history.length}</span>
+        </div>
+        <div className="status-tile">
           <strong>Flagged Items</strong>
-          <span className="status-value">{workspace_snapshot?.flaggedItems.length ?? 0}</span>
+          <span className="status-value">{active_snapshot?.flaggedItems.length ?? 0}</span>
         </div>
         <div className="status-tile">
           <strong>Reasoning Items</strong>
-          <span className="status-value">{workspace_snapshot?.reasoningItems.length ?? 0}</span>
+          <span className="status-value">{active_snapshot?.reasoningItems.length ?? 0}</span>
         </div>
         <div className="status-tile">
           <strong>Snapshot Time</strong>
           <span className="status-value">
-            {workspace_snapshot?.generatedAt
-              ? new Date(workspace_snapshot.generatedAt).toLocaleTimeString()
+            {active_snapshot?.generatedAt
+              ? new Date(active_snapshot.generatedAt).toLocaleTimeString()
               : "not loaded"}
           </span>
         </div>
@@ -282,6 +590,9 @@ export default function HomePage(): JSX.Element {
             disabled={video_run_loading}
           >
             {video_run_loading ? "Running..." : "Run Description + Debate"}
+          </button>
+          <button type="button" className="secondary-action" onClick={on_new_input} disabled={video_run_loading}>
+            New Input
           </button>
         </div>
 
@@ -334,21 +645,61 @@ export default function HomePage(): JSX.Element {
               </button>
               <span className="panel-meta">{summary_text}</span>
             </div>
-            {!workspace_snapshot || workspace_snapshot.flaggedItems.length === 0 ? (
+            {!active_snapshot || active_snapshot.flaggedItems.length === 0 ? (
               <div className="empty-state">No flagged windows found.</div>
             ) : (
               <ul className="recent-runs-list">
-                {workspace_snapshot.flaggedItems.slice(0, 15).map((item) => (
+                {active_snapshot.flaggedItems.slice(0, 15).map((item) => (
                   <li key={item.windowId}>
                     <button
                       type="button"
                       className="run-select-button"
-                      onClick={() => set_selected_window_id(item.windowId)}
+                      onClick={() => {
+                        set_selected_window_id(item.windowId);
+                        set_review_actions((prev) => ({
+                          ...prev,
+                          openedReasoningDetailsCount: prev.openedReasoningDetailsCount + 1
+                        }));
+                      }}
                     >
                       <strong>{item.windowId}</strong>
                       <span>
                         rank #{item.anomalyRank} | {item.isNoise ? "noise" : `cluster ${item.clusterLabel}`} |
                         score {item.outlierScore.toFixed(4)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="section-card">
+            <div className="section-header">
+              <h2>Previous Cases</h2>
+              <p>Click any completed run to re-open its artifacts without refreshing.</p>
+            </div>
+            {case_history.length === 0 ? (
+              <div className="empty-state">No previous cases yet.</div>
+            ) : (
+              <ul className="recent-runs-list">
+                {case_history.map((item) => (
+                  <li key={item.runId}>
+                    <button
+                      type="button"
+                      className="run-select-button"
+                      onClick={() => {
+                        set_selected_case_id(item.runId);
+                        set_review_actions((prev) => ({
+                          ...prev,
+                          openedPreviousCaseCount: prev.openedPreviousCaseCount + 1
+                        }));
+                      }}
+                    >
+                      <strong>{item.videoName}</strong>
+                      <span>
+                        {item.status.toUpperCase()} | {item.runtimeSec ? `${item.runtimeSec.toFixed(1)}s` : "-"} |{" "}
+                        {new Date(item.startedAt).toLocaleTimeString()}
                       </span>
                     </button>
                   </li>
@@ -464,6 +815,20 @@ export default function HomePage(): JSX.Element {
                 >
                   {selected_proposal.decision.replace(/_/g, " ")}
                 </span>
+              </div>
+              <div className="panel-toolbar">
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() =>
+                    set_review_actions((prev) => ({
+                      ...prev,
+                      viewedFinalProposalCount: prev.viewedFinalProposalCount + 1
+                    }))
+                  }
+                >
+                  Track Proposal View
+                </button>
               </div>
 
               <div className="capsule-block">
