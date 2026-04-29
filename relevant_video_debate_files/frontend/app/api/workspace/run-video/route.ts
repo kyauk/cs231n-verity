@@ -3,8 +3,16 @@ import path from "path";
 import { spawn } from "child_process";
 
 import { NextResponse } from "next/server";
+import { Agent, fetch as undiciFetch } from "undici";
 
 export const runtime = "nodejs";
+
+const LONG_LIVED_REMOTE_AGENT = new Agent({
+  headersTimeout: 0,
+  bodyTimeout: 0,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 3_600_000,
+});
 
 const PROJECT_ROOT = path.resolve(process.cwd(), "..");
 const OUTPUTS_ROOT = path.resolve(PROJECT_ROOT, "outputs");
@@ -216,10 +224,11 @@ async function forward_to_remote_gpu(file: File): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60 * 60 * 1000);
   try {
-    const response = await fetch(REMOTE_GPU_RUN_URL, {
+    const response = await undiciFetch(REMOTE_GPU_RUN_URL, {
       method: "POST",
-      body: form,
-      signal: controller.signal
+      body: form as unknown as BodyInit,
+      signal: controller.signal,
+      dispatcher: LONG_LIVED_REMOTE_AGENT,
     });
     const response_text = await response.text();
     let parsed: unknown;
