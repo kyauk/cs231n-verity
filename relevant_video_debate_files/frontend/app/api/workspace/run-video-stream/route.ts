@@ -17,6 +17,7 @@ const LONG_LIVED_REMOTE_AGENT = new Agent({
 const PROJECT_ROOT = path.resolve(process.cwd(), "..");
 const OUTPUTS_ROOT = path.resolve(PROJECT_ROOT, "outputs");
 const INPUTS_ROOT = path.resolve(PROJECT_ROOT, "inputs");
+const HISTORY_ROOT = path.resolve(OUTPUTS_ROOT, "history");
 const PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:";
 
 const REMOTE_GPU_STREAM_URL =
@@ -48,6 +49,12 @@ async function read_jsonl_rows(path_from_outputs: string): Promise<JsonRow[]> {
   }
 }
 
+async function append_jsonl_row(path_from_outputs: string, row: JsonRow): Promise<void> {
+  const target = path.resolve(OUTPUTS_ROOT, path_from_outputs);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.appendFile(target, `${JSON.stringify(row)}\n`, "utf-8");
+}
+
 function as_string(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -69,6 +76,33 @@ function artifact_url(raw_path: unknown): string | null {
   }
   const relative = raw_path.replace(/^outputs\//, "");
   return `/api/workspace/artifact?path=${encodeURIComponent(relative)}`;
+}
+
+async function append_window_history(window_id: string, flagged_row: JsonRow, manifest_row: JsonRow): Promise<void> {
+  await append_jsonl_row("history/flagged_windows.jsonl", flagged_row);
+  await append_jsonl_row("history/flagged_visuals/manifest.jsonl", manifest_row);
+
+  const [description_rows, debate_rows, proposal_rows] = await Promise.all([
+    read_jsonl_rows("reasoning/description_outputs.jsonl"),
+    read_jsonl_rows("reasoning/debate_outputs.jsonl"),
+    read_jsonl_rows("reasoning/proposals.jsonl")
+  ]);
+
+  const latest_description =
+    [...description_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
+  const latest_debate = [...debate_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
+  const latest_proposal =
+    [...proposal_rows].reverse().find((row) => as_string(row.window_id) === window_id) ?? null;
+
+  if (latest_description) {
+    await append_jsonl_row("history/reasoning/description_outputs.jsonl", latest_description);
+  }
+  if (latest_debate) {
+    await append_jsonl_row("history/reasoning/debate_outputs.jsonl", latest_debate);
+  }
+  if (latest_proposal) {
+    await append_jsonl_row("history/reasoning/proposals.jsonl", latest_proposal);
+  }
 }
 
 async function load_latest_outputs(window_id: string): Promise<{
@@ -242,6 +276,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   await fs.mkdir(OUTPUTS_ROOT, { recursive: true });
+  await fs.mkdir(HISTORY_ROOT, { recursive: true });
   await fs.mkdir(path.resolve(OUTPUTS_ROOT, "flagged_visuals"), { recursive: true });
   await fs.mkdir(path.resolve(OUTPUTS_ROOT, "reasoning"), { recursive: true });
   await fs.mkdir(INPUTS_ROOT, { recursive: true });
@@ -383,6 +418,8 @@ export async function POST(request: Request): Promise<Response> {
             controller.close();
             return;
           }
+
+          await append_window_history(window_id, flagged_row, manifest_row);
 
           let reasoning_summary: unknown = null;
           try {

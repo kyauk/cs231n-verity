@@ -31,6 +31,16 @@ async function read_jsonl(path_from_outputs: string): Promise<JsonObject[]> {
   }
 }
 
+async function read_jsonl_with_fallback(paths_from_outputs: string[]): Promise<JsonObject[]> {
+  for (const path_from_outputs of paths_from_outputs) {
+    const rows = await read_jsonl(path_from_outputs);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+  return [];
+}
+
 function as_number(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -59,11 +69,23 @@ function artifact_url(raw_path: unknown): string | null {
 }
 
 export async function GET(): Promise<Response> {
-  const anomaly_rows = await read_jsonl("flagged_windows.jsonl");
-  const visual_rows = await read_jsonl("flagged_visuals/manifest.jsonl");
-  const debate_rows = await read_jsonl("reasoning/debate_outputs.jsonl");
-  const description_rows = await read_jsonl("reasoning/description_outputs.jsonl");
-  const proposal_rows = await read_jsonl("reasoning/proposals.jsonl");
+  const anomaly_rows = await read_jsonl_with_fallback(["history/flagged_windows.jsonl", "flagged_windows.jsonl"]);
+  const visual_rows = await read_jsonl_with_fallback([
+    "history/flagged_visuals/manifest.jsonl",
+    "flagged_visuals/manifest.jsonl"
+  ]);
+  const debate_rows = await read_jsonl_with_fallback([
+    "history/reasoning/debate_outputs.jsonl",
+    "reasoning/debate_outputs.jsonl"
+  ]);
+  const description_rows = await read_jsonl_with_fallback([
+    "history/reasoning/description_outputs.jsonl",
+    "reasoning/description_outputs.jsonl"
+  ]);
+  const proposal_rows = await read_jsonl_with_fallback([
+    "history/reasoning/proposals.jsonl",
+    "reasoning/proposals.jsonl"
+  ]);
 
   const anomaly_summary = await read_json("anomaly_summary.json");
   const visual_summary = await read_json("flagged_visuals/summary.json");
@@ -79,8 +101,8 @@ export async function GET(): Promise<Response> {
     description_by_window.set(as_string(row.window_id), row);
   }
 
-  const flagged_items = anomaly_rows
-    .sort((a, b) => as_number(a.anomaly_rank, 10 ** 9) - as_number(b.anomaly_rank, 10 ** 9))
+  const flagged_items = [...anomaly_rows]
+    .reverse()
     .slice(0, 25)
     .map((row) => {
       const window_id = as_string(row.window_id);
@@ -98,7 +120,7 @@ export async function GET(): Promise<Response> {
       };
     });
 
-  const reasoning_items = debate_rows.slice(0, 25).map((row) => {
+  const reasoning_items = [...debate_rows].reverse().slice(0, 25).map((row) => {
     const window_id = as_string(row.window_id);
     const description = description_by_window.get(window_id);
     const metadata = as_object(row.metadata);
@@ -116,7 +138,7 @@ export async function GET(): Promise<Response> {
     };
   });
 
-  const proposals = proposal_rows.map((row) => ({
+  const proposals = [...proposal_rows].reverse().map((row) => ({
     caseId: as_string(row.case_id),
     windowId: as_string(row.window_id),
     generatedAt: as_string(row.generated_at),

@@ -63,6 +63,8 @@ type CaseRunSummary = {
   selectedWindowId: string | null;
 };
 
+const CASE_HISTORY_STORAGE_KEY = "workspace_case_history_v1";
+
 function metric_status_label(status: RunMetricStatus): string {
   return status.replace(/_/g, " ");
 }
@@ -134,6 +136,29 @@ export default function HomePage(): JSX.Element {
     openedReasoningDetailsCount: 0,
     viewedFinalProposalCount: 0
   });
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CASE_HISTORY_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        set_case_history(parsed as CaseRunSummary[]);
+      }
+    } catch {
+      /* ignore local cache parse failures */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CASE_HISTORY_STORAGE_KEY, JSON.stringify(case_history));
+    } catch {
+      /* ignore storage write failures */
+    }
+  }, [case_history]);
 
   function append_progress(payload: PipelineProgressPayload): void {
     set_progress_log((prev) => {
