@@ -58,16 +58,23 @@ export async function fetchBatchJobs(): Promise<BatchJob[]> {
   return data.batches
 }
 
+/** Probe a GCS path and return how many segments are available. */
+export async function probePath(uri: string): Promise<{ valid: boolean; segmentCount: number; detail: string }> {
+  const response = await fetch(`${API_BASE_URL}/probe-path?uri=${encodeURIComponent(uri)}`, { cache: 'no-store' })
+  return parseResponse<{ valid: boolean; segmentCount: number; detail: string }>(response)
+}
+
 /** Launch a new embedding batch and return the created record. */
 export async function launchBatch(
   dataSourceUri: string,
   label: string,
   region: string,
+  maxSegments: number = 5,
 ): Promise<BatchJob> {
   const response = await fetch(`${API_BASE_URL}/batches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataSourceUri, label, region }),
+    body: JSON.stringify({ dataSourceUri, label, region, maxSegments }),
   })
   const data = await parseResponse<{ batch: BatchJob }>(response)
   return data.batch

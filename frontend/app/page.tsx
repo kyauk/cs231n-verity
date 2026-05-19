@@ -79,9 +79,10 @@ export default function Home() {
     dataSourceUri: string,
     label: string,
     region: string,
+    maxSegments: number,
   ) => {
     // Let errors propagate — IngestTab catches and displays them inline.
-    await launchBatch(dataSourceUri, label, region)
+    await launchBatch(dataSourceUri, label, region, maxSegments)
     await loadBatchJobs()
   }
 

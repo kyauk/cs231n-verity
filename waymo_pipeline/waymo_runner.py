@@ -222,16 +222,35 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
         _update(status="failed", error=str(error), completedAt=_now_iso())
 
 
-def _probe_gcs_path(uri: str) -> int:
-    """Return the number of Parquet files found at a gs:// URI, or -1 on auth error."""
+def _probe_gcs_path(uri: str) -> tuple[int, str]:
+    """Return (count, error_detail). count=-1 on failure."""
     try:
         import gcsfs  # noqa: PLC0415
         fs = gcsfs.GCSFileSystem(token="google_default")
         path = uri.removeprefix("gs://")
         files = fs.ls(path)
-        return sum(1 for f in files if str(f).endswith(".parquet"))
-    except Exception:  # noqa: BLE001
-        return -1
+        count = sum(1 for f in files if str(f).endswith(".parquet"))
+        return count, ""
+    except Exception as e:  # noqa: BLE001
+        return -1, str(e)
+
+
+@app.get("/probe-path")
+async def probe_path(uri: str) -> JSONResponse:
+    """Count Parquet files at a GCS URI without launching a batch.
+
+    Returns {valid: bool, segmentCount: int, detail: str}.
+    Used by the frontend to populate the segment slider after URI entry.
+    """
+    uri = uri.strip()
+    if not uri.startswith("gs://") or len(uri) <= len("gs://"):
+        return JSONResponse({"valid": False, "segmentCount": 0, "detail": "Not a valid gs:// path."})
+    count, err = _probe_gcs_path(uri)
+    if count < 0:
+        return JSONResponse({"valid": False, "segmentCount": 0, "detail": f"Could not access path: {err}"})
+    if count == 0:
+        return JSONResponse({"valid": False, "segmentCount": 0, "detail": "No Parquet scene files found at this path."})
+    return JSONResponse({"valid": True, "segmentCount": count, "detail": f"{count} segments available."})
 
 
 @app.post("/batches")
@@ -247,7 +266,7 @@ async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
         )
 
     # Probe the path for Parquet files
-    file_count = _probe_gcs_path(uri)
+    file_count, probe_err = _probe_gcs_path(uri)
     if file_count == 0:
         return JSONResponse(
             {"detail": f"No Parquet scene files found at '{uri}'. Check the path and make sure the bucket is accessible."},

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Rocket, FolderOpen, CheckCircle2, XCircle, Loader2, ExternalLink, ChevronDown, ChevronUp, Terminal, Info, AlertCircle } from 'lucide-react'
+import { Rocket, FolderOpen, CheckCircle2, XCircle, Loader2, ExternalLink, ChevronDown, ChevronUp, Terminal, Info, AlertCircle, ScanSearch } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -23,10 +23,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { BatchJob } from '@/lib/types'
+import { probePath } from '@/lib/api'
 
 interface IngestTabProps {
   batchJobs: BatchJob[]
-  onLaunchBatch: (dataSourceUri: string, label: string, region: string) => Promise<void>
+  onLaunchBatch: (dataSourceUri: string, label: string, region: string, maxSegments: number) => Promise<void>
   onViewClusterSpace: (batchId: string) => void
 }
 
@@ -65,13 +66,38 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   const [setupOpen, setSetupOpen] = useState(false)
   const [pathError, setPathError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
+  const [probing, setProbing] = useState(false)
+  const [segmentCount, setSegmentCount] = useState<number | null>(null)
+  const [maxSegments, setMaxSegments] = useState<number | 'all'>(5)
 
   const isValidGcsUri = (uri: string) => /^gs:\/\/[^/]+\/.+/.test(uri.trim())
-  const canLaunch = isValidGcsUri(dataSourceUri) && batchLabel.trim() !== '' && region !== '' && !launching
+  const canLaunch = isValidGcsUri(dataSourceUri) && batchLabel.trim() !== '' && region !== '' && !launching && !probing && !pathError
 
   const handleUriChange = (val: string) => {
     setDataSourceUri(val)
     setPathError(null)
+    setSegmentCount(null)
+    setMaxSegments(5)
+  }
+
+  const handleUriBlur = async () => {
+    if (!isValidGcsUri(dataSourceUri)) return
+    setProbing(true)
+    setPathError(null)
+    setSegmentCount(null)
+    try {
+      const result = await probePath(dataSourceUri)
+      if (result.valid) {
+        setSegmentCount(result.segmentCount)
+        setMaxSegments(result.segmentCount)
+      } else {
+        setPathError(result.detail)
+      }
+    } catch {
+      setPathError('Could not reach backend to validate path.')
+    } finally {
+      setProbing(false)
+    }
   }
 
   const handleLaunch = async () => {
@@ -79,10 +105,11 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
     setLaunching(true)
     setPathError(null)
     try {
-      await onLaunchBatch(dataSourceUri, batchLabel, region)
+      await onLaunchBatch(dataSourceUri, batchLabel, region, maxSegments === 'all' ? 0 : maxSegments)
       setDataSourceUri('')
       setBatchLabel('')
       setRegion('')
+      setMaxSegments(5)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to launch batch.'
       setPathError(msg)
@@ -213,17 +240,28 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                   placeholder="gs://your-bucket/path/to/parquet-files"
                   value={dataSourceUri}
                   onChange={(e) => handleUriChange(e.target.value)}
-                  className={`pl-10 font-mono text-sm ${pathError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                  onBlur={handleUriBlur}
+                  className={`pl-10 pr-10 font-mono text-sm ${pathError ? 'border-destructive focus-visible:ring-destructive' : segmentCount !== null ? 'border-primary/50' : ''}`}
                 />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {probing && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+                  {!probing && segmentCount !== null && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                  {!probing && pathError && <AlertCircle className="w-4 h-4 text-destructive" />}
+                </div>
               </div>
               {pathError ? (
                 <div className="flex items-start gap-2 text-destructive text-xs">
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>{pathError}</span>
                 </div>
+              ) : segmentCount !== null ? (
+                <p className="text-xs text-primary font-medium flex items-center gap-1">
+                  <ScanSearch className="w-3.5 h-3.5" />
+                  {segmentCount} segments found
+                </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  GCS path to the directory containing your dataset&apos;s Parquet scene files. See &ldquo;How to connect your dataset&rdquo; above for examples.
+                  GCS path to the directory containing your dataset&apos;s Parquet scene files. Tab out of the field to scan available segments.
                 </p>
               )}
             </div>
@@ -259,6 +297,53 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                 </Select>
               </div>
             </div>
+
+            {/* Segment Count — only shown after path is probed */}
+            {segmentCount !== null && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">
+                    Segments to Process
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setMaxSegments(maxSegments === 'all' ? Math.min(5, segmentCount) : 'all')}
+                    className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                      maxSegments === 'all'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'text-muted-foreground border-muted-foreground/30 hover:border-primary hover:text-primary'
+                    }`}
+                  >
+                    All
+                  </button>
+                </div>
+                {maxSegments !== 'all' ? (
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={1}
+                      max={segmentCount}
+                      value={maxSegments}
+                      onChange={e => setMaxSegments(Number(e.target.value))}
+                      className="flex-1 accent-primary"
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={segmentCount}
+                      value={maxSegments}
+                      onChange={e => {
+                        const v = Math.min(segmentCount, Math.max(1, Number(e.target.value)))
+                        setMaxSegments(v)
+                      }}
+                      className="w-20 text-center font-mono"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">All {segmentCount} segments will be processed.</p>
+                )}
+              </div>
+            )}
 
             {/* Launch Button */}
             <Button
