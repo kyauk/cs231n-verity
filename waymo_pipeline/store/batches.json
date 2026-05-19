@@ -1,0 +1,28 @@
+[
+  {
+    "id": "batch-4be47045",
+    "label": "Test Batch",
+    "dataSourceUri": "gs://",
+    "region": "US-West",
+    "status": "failed",
+    "stage": "extract",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-05-19T17:50:48.250648+00:00",
+    "completedAt": "2026-05-19T17:51:48.028040+00:00",
+    "error": "ohttp/client.py\", line 1521, in __aenter__\n    self._resp: _RetType = await self._coro\n                           ^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 788, in _request\n    resp = await handler(req)\n           ^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 742, in _connect_and_send_request\n    conn = await self._connector.connect(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 672, in connect\n    proto = await self._create_connection(req, traces, timeout)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1251, in _create_connection\n    _, proto = await self._create_direct_connection(req, traces, timeout)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1623, in _create_direct_connection\n    raise last_exc\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1592, in _create_direct_connection\n    transp, proto = await self._wrap_create_connection(\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1327, in _wrap_create_connection\n    raise ClientConnectorCertificateError(req.connection_key, exc) from exc\naiohttp.client_exceptions.ClientConnectorCertificateError: Cannot connect to host storage.googleapis.com:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)')]\n"
+  },
+  {
+    "id": "batch-e56f32f7",
+    "label": "Should fail batch",
+    "dataSourceUri": "gs://",
+    "region": "US-East",
+    "status": "failed",
+    "stage": "extract",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-05-19T17:55:16.187594+00:00",
+    "completedAt": "2026-05-19T17:55:58.885610+00:00",
+    "error": "ohttp/client.py\", line 1521, in __aenter__\n    self._resp: _RetType = await self._coro\n                           ^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 788, in _request\n    resp = await handler(req)\n           ^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 742, in _connect_and_send_request\n    conn = await self._connector.connect(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 672, in connect\n    proto = await self._create_connection(req, traces, timeout)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1251, in _create_connection\n    _, proto = await self._create_direct_connection(req, traces, timeout)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1623, in _create_direct_connection\n    raise last_exc\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1592, in _create_direct_connection\n    transp, proto = await self._wrap_create_connection(\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1327, in _wrap_create_connection\n    raise ClientConnectorCertificateError(req.connection_key, exc) from exc\naiohttp.client_exceptions.ClientConnectorCertificateError: Cannot connect to host storage.googleapis.com:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)')]\n"
+  }
+]
