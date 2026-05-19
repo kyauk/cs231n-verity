@@ -165,6 +165,9 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
 
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(PROJECT_ROOT)}
     OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
+    mp4_dir = OUTPUTS_ROOT / "mp4s"
+    mp4_dir.mkdir(parents=True, exist_ok=True)
+    index_path = OUTPUTS_ROOT / "segment_index.json"
     scene_jsonl = OUTPUTS_ROOT / "waymo_scene_windows.jsonl"
     embed_jsonl = OUTPUTS_ROOT / "waymo_window_embeddings.jsonl"
     npz_path = OUTPUTS_ROOT / "waymo_clusters.npz"
@@ -172,10 +175,21 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
     flagged_jsonl = OUTPUTS_ROOT / "flagged_windows.jsonl"
 
     stages = [
+        # Stage 1: Parquet -> MP4 -> GCS + signed-URL index
+        ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_video_pipeline",
+          "--num-segments", str(max_segments),
+          "--out-dir", str(mp4_dir),
+          "--index-out", str(index_path),
+          *(["--data-source-uri", data_source_uri] if data_source_uri else [])],
+         "mp4"),
+        # Stage 2: GCS frame URIs -> SceneWindow JSONL
         ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_extract_scene_windows",
-          "--output-jsonl", str(scene_jsonl), "--max-segments", str(max_segments)], "extract"),
+          "--output-jsonl", str(scene_jsonl), "--max-segments", str(max_segments),
+          "--data-source-uri", data_source_uri], "extract"),
+        # Stage 3: SceneWindow JSONL -> Cosmos Embed1 -> embedding JSONL
         ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_embed_scenes",
           "--input-jsonl", str(scene_jsonl), "--output-jsonl", str(embed_jsonl)], "embed"),
+        # Stage 4: embeddings -> UMAP(50d) -> HDBSCAN -> 3D UMAP -> cluster JSONL
         ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_cluster_embeddings",
           "--input-jsonl", str(embed_jsonl), "--output-npz", str(npz_path),
           "--output-jsonl", str(clusters_jsonl), "--flagged-jsonl", str(flagged_jsonl)], "cluster"),
@@ -208,9 +222,38 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
         _update(status="failed", error=str(error), completedAt=_now_iso())
 
 
+def _probe_gcs_path(uri: str) -> int:
+    """Return the number of Parquet files found at a gs:// URI, or -1 on auth error."""
+    try:
+        import gcsfs  # noqa: PLC0415
+        fs = gcsfs.GCSFileSystem(token="google_default")
+        path = uri.removeprefix("gs://")
+        files = fs.ls(path)
+        return sum(1 for f in files if str(f).endswith(".parquet"))
+    except Exception:  # noqa: BLE001
+        return -1
+
+
 @app.post("/batches")
 async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
     """Launch a new Waymo embedding batch and return the created record."""
+    uri = payload.dataSourceUri.strip()
+
+    # Basic format check
+    if not uri.startswith("gs://") or len(uri) <= len("gs://"):
+        return JSONResponse(
+            {"detail": f"'{uri}' is not a valid GCS path. Must start with gs:// followed by a bucket and prefix."},
+            status_code=400,
+        )
+
+    # Probe the path for Parquet files
+    file_count = _probe_gcs_path(uri)
+    if file_count == 0:
+        return JSONResponse(
+            {"detail": f"No Parquet scene files found at '{uri}'. Check the path and make sure the bucket is accessible."},
+            status_code=400,
+        )
+
     batch_id = f"batch-{uuid.uuid4().hex[:8]}"
     record = {
         "id": batch_id,
@@ -395,8 +438,10 @@ def _ensure_regression_suite() -> Path:
 def _ensure_visual_manifest(scene_id: str) -> Path:
     """Build a media manifest mapping the scene window to its FRONT-camera clip.
 
-    The manifest's mp4_path is a local path so the description stage can decode
-    it. If a cached local clip exists under outputs/waymo/clips it is reused.
+    Tries to resolve a local MP4 clip in this order:
+      1. Cached clip at outputs/waymo/clips/{log_id}_FRONT.mp4
+      2. Local MP4 written by the video pipeline stage under outputs/waymo/mp4s/
+      3. Signed GCS URL from segment_index.json — downloaded and cached locally
     """
     OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
     manifest_path = OUTPUTS_ROOT / "flagged_visuals" / "manifest.jsonl"
@@ -410,9 +455,27 @@ def _ensure_visual_manifest(scene_id: str) -> Path:
     clip_dir.mkdir(parents=True, exist_ok=True)
     local_clip = clip_dir / f"{log_id}_FRONT.mp4"
 
-    mp4_path = ""
+    # 1. Already cached
     if local_clip.exists():
-        mp4_path = str(local_clip.relative_to(PROJECT_ROOT))
+        mp4_path = str(local_clip)
+    else:
+        # 2. Written locally by the video pipeline stage
+        pipeline_clip = OUTPUTS_ROOT / "mp4s" / log_id / f"{log_id}_FRONT.mp4"
+        if pipeline_clip.exists():
+            mp4_path = str(pipeline_clip)
+        else:
+            # 3. Download from signed GCS URL and cache
+            index = _segment_index()
+            signed_url = index.get(log_id, {}).get("FRONT", "")
+            if signed_url:
+                try:
+                    import urllib.request
+                    urllib.request.urlretrieve(signed_url, str(local_clip))
+                    mp4_path = str(local_clip)
+                except Exception:  # noqa: BLE001
+                    mp4_path = ""
+            else:
+                mp4_path = ""
 
     manifest_path.write_text(
         json.dumps({"window_id": scene_id, "grid_path": "", "mp4_path": mp4_path}) + "\n",

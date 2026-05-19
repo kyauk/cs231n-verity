@@ -80,12 +80,9 @@ export default function Home() {
     label: string,
     region: string,
   ) => {
-    try {
-      await launchBatch(dataSourceUri, label, region)
-      await loadBatchJobs()
-    } catch {
-      /* runner offline — no-op, UI form already cleared */
-    }
+    // Let errors propagate — IngestTab catches and displays them inline.
+    await launchBatch(dataSourceUri, label, region)
+    await loadBatchJobs()
   }
 
   const handleViewClusterSpace = (_batchId: string) => {

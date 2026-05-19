@@ -23,6 +23,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import cv2
@@ -263,10 +265,71 @@ def segment_already_done(segment_id: str, gcs_client: storage.Client) -> bool:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _process_one(
+    seg_id: str,
+    seg_index: int,
+    total: int,
+    out_dir: Path,
+    creds: object,
+    project: str,
+    sign_as: str | None,
+    skip_upload: bool,
+    verify_lock: threading.Lock,
+    verified: list[bool],
+) -> tuple[str, dict[str, str] | None]:
+    """Process one segment end-to-end. Returns (seg_id, url_map | None)."""
+    # Each thread gets its own GCS clients — gcsfs and storage.Client aren't thread-safe.
+    fs = gcsfs.GCSFileSystem(token=creds)
+    gcs_client = storage.Client(credentials=creds, project=project or "nvidia-adr")
+
+    print(f"[{seg_index}/{total}] Segment: {seg_id}")
+
+    if not skip_upload and segment_already_done(seg_id, gcs_client):
+        print(f"  [{seg_id}] Already processed — skipping.")
+        blob_names = {
+            cam: f"{DEST_PREFIX}/{seg_id}/{seg_id}_{cam}.mp4"
+            for cam in CAMERA_NAMES.values()
+        }
+        urls = generate_signed_urls(blob_names, gcs_client, sign_as)
+        return seg_id, urls
+
+    seg_out_dir = out_dir / seg_id
+    seg_out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        camera_paths = process_segment(seg_id, fs, seg_out_dir)
+    except Exception as e:
+        print(f"  [{seg_id}] ERROR: {e}")
+        return seg_id, None
+
+    # Verify first segment to finish (thread-safe, once only)
+    with verify_lock:
+        if not verified[0] and camera_paths:
+            front_path = camera_paths.get("FRONT") or next(iter(camera_paths.values()))
+            print(f"\n[Step 5] Verifying {seg_id}...")
+            verify_first_frame(front_path)
+            verified[0] = True
+
+    if skip_upload:
+        return seg_id, {cam: str(p) for cam, p in camera_paths.items()}
+
+    blob_names = upload_mp4s(camera_paths, seg_id, gcs_client)
+    urls = generate_signed_urls(blob_names, gcs_client, sign_as)
+
+    for p in camera_paths.values():
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+    return seg_id, urls
+
+
 def main():
     parser = argparse.ArgumentParser(description="Waymo v2 → MP4 pipeline")
     parser.add_argument("--num-segments", type=int, default=20, help="Number of segments to process (0 = all)")
     parser.add_argument("--out-dir", type=str, default="/tmp/waymo_mp4s", help="Local directory for MP4s")
+    parser.add_argument("--workers", type=int, default=6, help="Concurrent segments to process")
     parser.add_argument("--sign-as", type=str, default=None,
                         help="Service account email to impersonate for signing (local dev only). "
                              "Omit when running on GCE/BREV with SA attached.")
@@ -277,72 +340,34 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Auth
     creds, project = google_auth_default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     fs = gcsfs.GCSFileSystem(token=creds)
-    gcs_client = storage.Client(credentials=creds, project=project or "nvidia-adr")
 
     # Step 1
     all_segments = discover_segments(fs)
     segments = all_segments if args.num_segments == 0 else all_segments[: args.num_segments]
-    print(f"\nProcessing {len(segments)} of {len(all_segments)} segments.")
+    print(f"\nProcessing {len(segments)} of {len(all_segments)} segments with {args.workers} workers.")
 
-    index = {}
-    verified = False
+    index: dict[str, dict[str, str]] = {}
+    verify_lock = threading.Lock()
+    verified: list[bool] = [False]
 
-    for i, seg_id in enumerate(tqdm(segments, desc="Segments", unit="seg")):
-        print(f"\n[{i+1}/{len(segments)}] Segment: {seg_id}")
-
-        # Resumability — skip if all 5 blobs already in GCS
-        if not args.skip_upload and segment_already_done(seg_id, gcs_client):
-            print("  Already processed — skipping.")
-            # Still need URLs for the index — regenerate them
-            bucket = gcs_client.bucket(DEST_BUCKET)
-            blob_names = {
-                cam: f"{DEST_PREFIX}/{seg_id}/{seg_id}_{cam}.mp4"
-                for cam in CAMERA_NAMES.values()
-            }
-            urls = generate_signed_urls(blob_names, gcs_client, args.sign_as)
-            index[seg_id] = urls
-            continue
-
-        # Step 2 — reconstruct MP4s locally
-        seg_out_dir = out_dir / seg_id
-        seg_out_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            camera_paths = process_segment(seg_id, fs, seg_out_dir)
-        except Exception as e:
-            print(f"  ERROR processing {seg_id}: {e}")
-            continue
-
-        # Step 5 — verify first segment only
-        if not verified and camera_paths:
-            front_path = camera_paths.get("FRONT") or next(iter(camera_paths.values()))
-            print("\n[Step 5] Verifying first segment...")
-            verify_first_frame(front_path)
-            verified = True
-
-        if args.skip_upload:
-            index[seg_id] = {cam: str(p) for cam, p in camera_paths.items()}
-            continue
-
-        # Step 3 — upload
-        print("  Uploading to GCS...")
-        blob_names = upload_mp4s(camera_paths, seg_id, gcs_client)
-
-        # Step 4 — sign
-        urls = generate_signed_urls(blob_names, gcs_client, args.sign_as)
-        index[seg_id] = urls
-
-        # Clean up local files to save disk
-        for p in camera_paths.values():
-            try:
-                os.remove(p)
-            except OSError:
-                pass
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {
+            pool.submit(
+                _process_one,
+                seg_id, i + 1, len(segments),
+                out_dir, creds, project, args.sign_as,
+                args.skip_upload, verify_lock, verified,
+            ): seg_id
+            for i, seg_id in enumerate(segments)
+        }
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Segments", unit="seg"):
+            seg_id, urls = future.result()
+            if urls is not None:
+                index[seg_id] = urls
 
     # Write index
     index_path = Path(args.index_out)

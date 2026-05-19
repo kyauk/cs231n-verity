@@ -219,15 +219,16 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
                 </div>
               </CardHeader>
               <CardContent>
-                <div 
+                <div
                   ref={el => { terminalRefs.current[index] = el }}
                   className={cn(
-                    'bg-terminal-bg rounded-lg p-4 font-mono text-sm h-40 overflow-auto',
+                    'rounded-lg p-4 font-mono text-sm h-40 overflow-auto',
                     step.status === 'pending' && 'opacity-50'
                   )}
+                  style={{ backgroundColor: 'oklch(0.15 0.02 240)' }}
                 >
                   {step.output ? (
-                    <pre className="text-terminal-text whitespace-pre-wrap">
+                    <pre className="whitespace-pre-wrap" style={{ color: 'oklch(0.65 0.2 125)' }}>
                       {step.output}
                       {step.status === 'running' && (
                         <span className="inline-block w-2 h-4 bg-terminal-text ml-0.5 animate-blink" />

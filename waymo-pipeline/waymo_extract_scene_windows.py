@@ -231,6 +231,21 @@ def extract_scene_windows(
     return scenes
 
 
+def _parse_gcs_uri(uri: str) -> tuple[str, str]:
+    """Split ``gs://bucket/prefix`` into ``(bucket, prefix)``.
+
+    Falls back to the module-level defaults when the URI is absent or not a
+    recognised GCS URI so the script remains runnable without arguments.
+    """
+    uri = uri.strip().rstrip("/")
+    if uri.startswith("gs://"):
+        without_scheme = uri[len("gs://"):]
+        bucket, _, prefix = without_scheme.partition("/")
+        return bucket, prefix or SOURCE_PREFIX
+    # Not a GCS URI — honour env-var overrides then hardcoded defaults.
+    return SOURCE_BUCKET, SOURCE_PREFIX
+
+
 def main() -> None:
     """Run end-to-end Waymo retrieval + scene-window extraction to JSONL."""
     load_dotenv()
@@ -240,14 +255,22 @@ def main() -> None:
     parser.add_argument("--sync-tolerance-us", type=int, default=50_000)
     parser.add_argument("--min-complete-tick-rate", type=float, default=0.9)
     parser.add_argument("--scene-ticks", type=int, default=DEFAULT_SCENE_TICKS)
+    parser.add_argument(
+        "--data-source-uri",
+        default=os.environ.get("DATA_SOURCE_URI", ""),
+        help="GCS URI of the dataset root, e.g. gs://my-bucket/validation/camera_image",
+    )
     args = parser.parse_args()
+
+    bucket, prefix = _parse_gcs_uri(args.data_source_uri)
+    print(f"[Config] source bucket={bucket}  prefix={prefix}")
 
     creds, _ = google_auth_default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     fs = gcsfs.GCSFileSystem(token=creds)
 
-    all_segments = discover_segments(fs)
+    all_segments = discover_segments(fs, bucket=bucket, prefix=prefix)
     segments = all_segments[: args.max_segments] if args.max_segments else all_segments
 
     os.makedirs(os.path.dirname(args.output_jsonl) or ".", exist_ok=True)

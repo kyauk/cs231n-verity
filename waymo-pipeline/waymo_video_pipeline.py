@@ -34,10 +34,12 @@ from google.cloud import storage
 from tqdm import tqdm
 
 # -- Constants ----------------------------------------------------------------
+# All bucket/prefix values can be overridden at runtime via env vars so that
+# any GCS-hosted driving dataset can be pointed at without code changes.
 
-SOURCE_BUCKET = "waymo_open_dataset_v_2_0_1"
-SOURCE_PREFIX = "validation/camera_image"
-DEST_BUCKET = "nvidia-adr-waymo-segment-videos"
+SOURCE_BUCKET = os.environ.get("WAYMO_SOURCE_BUCKET", "waymo_open_dataset_v_2_0_1")
+SOURCE_PREFIX = os.environ.get("WAYMO_SOURCE_PREFIX", "validation/camera_image")
+DEST_BUCKET = os.environ.get("WAYMO_DEST_BUCKET", "nvidia-adr-waymo-segment-videos")
 DEST_PREFIX = "segments"
 INDEX_FILE = "segment_index.json"
 FPS = 10
@@ -54,10 +56,14 @@ CAMERA_NAMES = {
 
 # -- Step 1: Discover segments ------------------------------------------------
 
-def discover_segments(fs: gcsfs.GCSFileSystem) -> list[str]:
-    """Enumerate Waymo validation segment ids present in GCS."""
-    print(f"\n[Step 1] Discovering segments in gs://{SOURCE_BUCKET}/{SOURCE_PREFIX}/")
-    files = fs.ls(f"{SOURCE_BUCKET}/{SOURCE_PREFIX}/")
+def discover_segments(
+    fs: gcsfs.GCSFileSystem,
+    bucket: str = SOURCE_BUCKET,
+    prefix: str = SOURCE_PREFIX,
+) -> list[str]:
+    """Enumerate segment ids (Parquet files) under gs://<bucket>/<prefix>/."""
+    print(f"\n[Step 1] Discovering segments in gs://{bucket}/{prefix}/")
+    files = fs.ls(f"{bucket}/{prefix}/")
     segment_ids: list[str] = []
     for f in files:
         name = Path(f).name
@@ -115,9 +121,11 @@ def process_segment(
     segment_id: str,
     fs: gcsfs.GCSFileSystem,
     out_dir: Path,
+    bucket: str = SOURCE_BUCKET,
+    prefix: str = SOURCE_PREFIX,
 ) -> dict[str, str]:
     """Reconstruct per-camera MP4s for one segment. Returns {camera: mp4_path}."""
-    parquet_path = f"{SOURCE_BUCKET}/{SOURCE_PREFIX}/{segment_id}.parquet"
+    parquet_path = f"{bucket}/{prefix}/{segment_id}.parquet"
     print(f"  Reading Parquet: {parquet_path}")
 
     with fs.open(parquet_path, "rb") as f:
@@ -255,7 +263,20 @@ def main() -> None:
                         help="Service account to impersonate for signing (local dev only).")
     parser.add_argument("--skip-upload", action="store_true")
     parser.add_argument("--index-out", type=str, default="segment_index.json")
+    parser.add_argument(
+        "--data-source-uri", default=os.environ.get("DATA_SOURCE_URI", ""),
+        help="GCS URI of dataset root, e.g. gs://bucket/validation/camera_image",
+    )
     args = parser.parse_args()
+
+    # Parse bucket/prefix from URI if provided, otherwise use env/defaults.
+    src_bucket, src_prefix = SOURCE_BUCKET, SOURCE_PREFIX
+    uri = (args.data_source_uri or "").strip().rstrip("/")
+    if uri.startswith("gs://"):
+        without_scheme = uri[len("gs://"):]
+        _b, _, _p = without_scheme.partition("/")
+        src_bucket = _b
+        src_prefix = _p or src_prefix
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -266,7 +287,7 @@ def main() -> None:
     fs = gcsfs.GCSFileSystem(token=creds)
     gcs_client = storage.Client(credentials=creds, project=project or "nvidia-adr")
 
-    all_segments = discover_segments(fs)
+    all_segments = discover_segments(fs, bucket=src_bucket, prefix=src_prefix)
     segments = all_segments if args.num_segments == 0 else all_segments[: args.num_segments]
     print(f"\nProcessing {len(segments)} of {len(all_segments)} segments.")
 
@@ -288,7 +309,7 @@ def main() -> None:
         seg_out_dir = out_dir / seg_id
         seg_out_dir.mkdir(parents=True, exist_ok=True)
         try:
-            camera_paths = process_segment(seg_id, fs, seg_out_dir)
+            camera_paths = process_segment(seg_id, fs, seg_out_dir, bucket=src_bucket, prefix=src_prefix)
         except Exception as e:  # noqa: BLE001
             print(f"  ERROR processing {seg_id}: {e}")
             continue

@@ -19,9 +19,11 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 
 import numpy as np
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -52,6 +54,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--window-size-ticks", type=int, default=0, help="0 = whole scene.")
     p.add_argument("--window-stride-ticks", type=int, default=0, help="0 = non-overlapping.")
     p.add_argument("--resume-from", default=None, help="Existing JSONL; skip embedded ids.")
+    p.add_argument("--max-workers", type=int, default=4,
+                   help="Parallel embedding threads (each does GCS+ffmpeg+Cosmos IO).")
     return p.parse_args()
 
 
@@ -277,7 +281,7 @@ def main() -> None:
             if window_id not in done_ids:
                 work.append((scene, window_id, start, end))
 
-    print(f"{len(work)} windows to embed.")
+    print(f"{len(work)} windows to embed  (max_workers={args.max_workers}).")
 
     same_file = (
         args.resume_from
@@ -285,15 +289,32 @@ def main() -> None:
     )
     write_mode = "a" if same_file else "w"
 
-    with open(args.output_jsonl, write_mode, encoding="utf-8") as out:
-        for scene, window_id, start, end in tqdm(work, unit="window"):
-            record = embed_window(
-                fs, scene, window_id, start, end, args.cosmos_url, args.clip_fps
-            )
-            out.write(json.dumps(record.model_dump()) + "\n")
-            out.flush()
+    write_lock = threading.Lock()
+    completed = 0
+    failed = 0
 
-    print(f"Done. {len(work)} windows -> {args.output_jsonl}")
+    def _embed_one(item: tuple) -> WindowEmbeddingRecord:
+        scene, window_id, start, end = item
+        return embed_window(fs, scene, window_id, start, end, args.cosmos_url, args.clip_fps)
+
+    with open(args.output_jsonl, write_mode, encoding="utf-8") as out:
+        with ThreadPoolExecutor(max_workers=args.max_workers) as pool:
+            futures = {pool.submit(_embed_one, item): item[1] for item in work}
+            pbar = tqdm(as_completed(futures), total=len(futures), unit="window")
+            for future in pbar:
+                window_id = futures[future]
+                try:
+                    record = future.result()
+                    with write_lock:
+                        out.write(json.dumps(record.model_dump()) + "\n")
+                        out.flush()
+                    completed += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    print(f"\n[warn] {window_id} failed: {exc}")
+                pbar.set_postfix(ok=completed, fail=failed)
+
+    print(f"Done. {completed} embedded, {failed} failed -> {args.output_jsonl}")
 
 
 if __name__ == "__main__":

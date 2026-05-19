@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState, useMemo, useEffect } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,107 +9,109 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Play, X, Maximize2, Loader2, ScatterChart } from 'lucide-react'
+import { Play, Maximize2, Loader2, ScatterChart } from 'lucide-react'
 import type { ClusterPoint, ClusterStats, Scene } from '@/lib/types'
 import { fetchScene } from '@/lib/api'
 
-// Cluster colors
 const CLUSTER_COLORS = [
-  '#76B900', // NVIDIA Green
-  '#0077B6', // Blue
-  '#7B2CBF', // Purple
-  '#F77F00', // Orange
-  '#2D6A4F', // Teal
+  '#76B900', // NVIDIA green
+  '#38BDF8', // sky blue
+  '#A78BFA', // violet
+  '#FB923C', // orange
+  '#34D399', // emerald
+  '#F472B6', // pink
+  '#FACC15', // yellow
+  '#60A5FA', // blue
 ]
-const NOISE_COLOR = '#DC2626' // Red for noise
+const NOISE_COLOR = '#F87171' // soft red
 
-interface PointCloudProps {
-  points: ClusterPoint[]
-  onPointClick: (point: ClusterPoint) => void
-  selectedPoint: ClusterPoint | null
-}
-
-function PointCloud({ points, onPointClick, selectedPoint }: PointCloudProps) {
-  const meshRef = useRef<THREE.InstancedMesh>(null)
-  
-  const tempObject = useMemo(() => new THREE.Object3D(), [])
-  const tempColor = useMemo(() => new THREE.Color(), [])
-  
-  // Set positions and colors after mesh is mounted
-  useEffect(() => {
-    if (!meshRef.current) return
-    
-    points.forEach((point, i) => {
-      tempObject.position.set(point.x, point.y, point.z)
-      tempObject.scale.setScalar(point.isNoise ? 0.12 : 0.1)
-      tempObject.updateMatrix()
-      meshRef.current!.setMatrixAt(i, tempObject.matrix)
-      
-      const color = point.isNoise 
-        ? NOISE_COLOR 
-        : CLUSTER_COLORS[point.clusterId % CLUSTER_COLORS.length]
-      tempColor.set(color)
-      meshRef.current!.setColorAt(i, tempColor)
-    })
-    
-    meshRef.current.instanceMatrix.needsUpdate = true
-    if (meshRef.current.instanceColor) {
-      meshRef.current.instanceColor.needsUpdate = true
-    }
-  }, [points, tempObject, tempColor])
-
-  // Pulse animation for selected point
-  useFrame((state) => {
-    if (!meshRef.current || !selectedPoint) return
-    
-    const selectedIndex = points.findIndex(p => p.id === selectedPoint.id)
-    if (selectedIndex === -1) return
-    
-    const scale = 0.15 + Math.sin(state.clock.elapsedTime * 4) * 0.05
-    tempObject.position.set(selectedPoint.x, selectedPoint.y, selectedPoint.z)
-    tempObject.scale.setScalar(scale)
-    tempObject.updateMatrix()
-    meshRef.current.setMatrixAt(selectedIndex, tempObject.matrix)
-    meshRef.current.instanceMatrix.needsUpdate = true
-  })
-
-  const handleClick = (e: any) => {
-    e.stopPropagation()
-    if (e.instanceId !== undefined) {
-      onPointClick(points[e.instanceId])
-    }
-  }
+// One sphere per point — R3F onClick on individual meshes is rock-solid.
+function Point({
+  point,
+  isSelected,
+  onClick,
+}: {
+  point: ClusterPoint
+  isSelected: boolean
+  onClick: (p: ClusterPoint) => void
+}) {
+  const color = point.isNoise ? NOISE_COLOR : CLUSTER_COLORS[point.clusterId % CLUSTER_COLORS.length]
+  const baseScale = point.isNoise ? 0.11 : 0.09
+  const scale = isSelected ? baseScale * 2.0 : baseScale
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[undefined, undefined, points.length]}
-      onClick={handleClick}
+    <mesh
+      position={[point.x, point.y, point.z]}
+      scale={scale}
+      onClick={(e) => { e.stopPropagation(); onClick(point) }}
     >
-      <sphereGeometry args={[1, 16, 16]} />
-      <meshBasicMaterial toneMapped={false} />
-    </instancedMesh>
+      <sphereGeometry args={[1, 10, 10]} />
+      <meshBasicMaterial color={color} toneMapped={false} />
+    </mesh>
   )
 }
 
-function Grid() {
+function AxisLabel({ position, label, color }: { position: [number, number, number]; label: string; color: string }) {
+  return (
+    <Html position={position} center style={{ pointerEvents: 'none' }}>
+      <span style={{ color, fontSize: 11, fontWeight: 600, fontFamily: 'monospace', textShadow: '0 0 4px white' }}>
+        {label}
+      </span>
+    </Html>
+  )
+}
+
+function Grid({ axisLen }: { axisLen: number }) {
   return (
     <group>
-      <gridHelper args={[20, 20, '#e5e7eb', '#f3f4f6']} position={[0, -5, 0]} />
-      <axesHelper args={[6]} />
+      <gridHelper args={[axisLen * 2, 20, '#e5e7eb', '#f3f4f6']} />
+      <axesHelper args={[axisLen]} />
+      <AxisLabel position={[axisLen + 0.5, 0, 0]} label="UMAP-1" color="#ef4444" />
+      <AxisLabel position={[0, axisLen + 0.5, 0]} label="UMAP-2" color="#22c55e" />
+      <AxisLabel position={[0, 0, axisLen + 0.5]} label="UMAP-3" color="#3b82f6" />
     </group>
   )
 }
 
-interface SceneModalProps {
+function CameraFit({ points }: { points: ClusterPoint[] }) {
+  const { camera, controls } = useThree() as any
+  const fitted = useRef(false)
+
+  useEffect(() => {
+    if (fitted.current || points.length === 0 || !controls) return
+    fitted.current = true
+
+    const box = new THREE.Box3()
+    points.forEach(p => box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z)))
+    const center = new THREE.Vector3()
+    box.getCenter(center)
+    const size = new THREE.Vector3()
+    box.getSize(size)
+    const maxDim = Math.max(size.x, size.y, size.z, 1)
+    const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180)
+    const dist = (maxDim / 2) / Math.tan(fov / 2) * 1.8
+
+    camera.position.set(center.x + dist * 0.6, center.y + dist * 0.5, center.z + dist * 0.6)
+    camera.near = dist * 0.01
+    camera.far = dist * 10
+    camera.updateProjectionMatrix()
+
+    controls.target.copy(center)
+    controls.minDistance = dist * 0.1
+    controls.maxDistance = dist * 5
+    controls.update()
+  }, [points, camera, controls])
+
+  return null
+}
+
+function SceneModal({ scene, loading, open, onClose, onAnalyze }: {
   scene: Scene | null
   loading: boolean
   open: boolean
   onClose: () => void
   onAnalyze: () => void
-}
-
-function SceneModal({ scene, loading, open, onClose, onAnalyze }: SceneModalProps) {
+}) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl">
@@ -119,9 +121,7 @@ function SceneModal({ scene, loading, open, onClose, onAnalyze }: SceneModalProp
             <Badge variant="outline" className="font-mono text-xs">{scene?.id ?? '—'}</Badge>
           </DialogTitle>
         </DialogHeader>
-
         <div className="space-y-4">
-          {/* Video Preview */}
           <div className="aspect-video bg-muted rounded-lg flex items-center justify-center relative overflow-hidden">
             {scene?.videoUrl ? (
               <video
@@ -136,55 +136,34 @@ function SceneModal({ scene, loading, open, onClose, onAnalyze }: SceneModalProp
                 <div className="absolute inset-0 bg-gradient-to-br from-muted to-muted/50" />
                 <div className="relative z-10 text-center">
                   <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                    {loading ? (
-                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                    ) : (
-                      <Play className="w-8 h-8 text-primary" />
-                    )}
+                    {loading ? <Loader2 className="w-8 h-8 text-primary animate-spin" /> : <Play className="w-8 h-8 text-primary" />}
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {loading ? 'Loading scene…' : 'Video Preview'}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{loading ? 'Loading scene…' : 'No video available'}</p>
                 </div>
               </>
             )}
           </div>
-
-          {/* Annotations */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Environment</h4>
               <div className="space-y-1.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Weather</span>
-                  <span className="font-medium">{scene?.annotations.weather ?? '—'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Time of Day</span>
-                  <span className="font-medium">{scene?.annotations.timeOfDay ?? '—'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Road Type</span>
-                  <span className="font-medium">{scene?.annotations.roadType ?? '—'}</span>
-                </div>
+                {(['weather', 'timeOfDay', 'roadType'] as const).map(k => (
+                  <div key={k} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground capitalize">{k === 'timeOfDay' ? 'Time of Day' : k === 'roadType' ? 'Road Type' : 'Weather'}</span>
+                    <span className="font-medium">{scene?.annotations[k] ?? '—'}</span>
+                  </div>
+                ))}
               </div>
             </div>
             <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Actors</h4>
+              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Events</h4>
               <div className="flex flex-wrap gap-1">
-                {(scene?.annotations.actors ?? []).map((actor) => (
-                  <Badge key={actor} variant="secondary" className="text-xs">{actor}</Badge>
-                ))}
-              </div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 mt-3">Events</h4>
-              <div className="flex flex-wrap gap-1">
-                {(scene?.annotations.events ?? []).map((event) => (
-                  <Badge key={event} variant="outline" className="text-xs">{event}</Badge>
+                {(scene?.annotations.events ?? []).map(ev => (
+                  <Badge key={ev} variant="outline" className="text-xs">{ev}</Badge>
                 ))}
               </div>
             </div>
           </div>
-
           <Button className="w-full" onClick={onAnalyze} disabled={loading || !scene}>
             <Play className="w-4 h-4 mr-2" />
             Analyze this scene
@@ -207,6 +186,12 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
   const [activeScene, setActiveScene] = useState<Scene | null>(null)
   const [sceneLoading, setSceneLoading] = useState(false)
 
+  const axisLen = useMemo(() => {
+    if (points.length === 0) return 6
+    const vals = points.flatMap(p => [Math.abs(p.x), Math.abs(p.y), Math.abs(p.z)])
+    return Math.ceil(Math.max(...vals) * 1.2) || 6
+  }, [points])
+
   const totalScenes = points.length
   const noiseCount = points.filter(p => p.isNoise).length
   const clusterCount = clusterStats.length
@@ -219,28 +204,14 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
     try {
       setActiveScene(await fetchScene(point.sceneId))
     } catch {
-      // Runner offline — fall back to a minimal scene so the modal still works.
       setActiveScene({
         id: point.sceneId,
         videoUrl: '',
         thumbnail: '',
-        annotations: {
-          weather: 'Unknown',
-          timeOfDay: 'Unknown',
-          roadType: 'Unknown',
-          actors: [],
-          events: [],
-        },
+        annotations: { weather: 'Unknown', timeOfDay: 'Unknown', roadType: 'Unknown', actors: [], events: [] },
       })
     } finally {
       setSceneLoading(false)
-    }
-  }
-
-  const handleAnalyze = () => {
-    if (activeScene) {
-      onAnalyzeScene(activeScene)
-      setModalOpen(false)
     }
   }
 
@@ -262,54 +233,54 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
 
   return (
     <div className="flex h-full">
-      {/* 3D Visualization */}
       <div className="flex-1 relative bg-gradient-to-br from-slate-50 to-slate-100 rounded-lg m-4 mr-0">
-        <Canvas
-          camera={{ position: [8, 6, 8], fov: 50 }}
-          gl={{ antialias: true }}
-        >
-          <ambientLight intensity={0.6} />
+        <Canvas camera={{ position: [8, 6, 8], fov: 50 }} gl={{ antialias: true }}>
+          <ambientLight intensity={0.7} />
           <pointLight position={[10, 10, 10]} intensity={0.8} />
-          <PointCloud 
-            points={points} 
-            onPointClick={handlePointClick}
-            selectedPoint={selectedPoint}
-          />
-          <Grid />
-          <OrbitControls 
-            enableDamping 
-            dampingFactor={0.05}
-            minDistance={5}
-            maxDistance={25}
-          />
+          <directionalLight position={[-5, 5, 5]} intensity={0.4} />
+
+          {points.map(p => (
+            <Point
+              key={p.id}
+              point={p}
+              isSelected={selectedPoint?.id === p.id}
+              onClick={handlePointClick}
+            />
+          ))}
+
+          <Grid axisLen={axisLen} />
+          <CameraFit points={points} />
+          <OrbitControls makeDefault enableDamping dampingFactor={0.05} />
         </Canvas>
 
-        {/* Legend */}
         <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur-sm rounded-lg p-3 border">
           <p className="text-xs font-medium text-foreground mb-2">Cluster Legend</p>
           <div className="space-y-1">
-            {CLUSTER_COLORS.map((color, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-muted-foreground">Cluster {i}</span>
+            {clusterStats.map(c => (
+              <div key={c.id} className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: CLUSTER_COLORS[c.id % CLUSTER_COLORS.length] }} />
+                <span className="text-muted-foreground">Cluster {c.id}</span>
+                <span className="text-muted-foreground/60 ml-auto pl-2">{c.sceneCount}</span>
               </div>
             ))}
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NOISE_COLOR }} />
-              <span className="text-muted-foreground">Noise</span>
-            </div>
+            {noiseCount > 0 && (
+              <div className="flex items-center gap-2 text-xs border-t pt-1 mt-1">
+                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: NOISE_COLOR }} />
+                <span className="text-muted-foreground">Noise</span>
+                <span className="text-muted-foreground/60 ml-auto pl-2">{noiseCount}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="absolute top-4 left-4 flex items-center gap-2">
+        <div className="absolute top-4 left-4">
           <Badge variant="secondary" className="bg-card/90 backdrop-blur-sm">
             <Maximize2 className="w-3 h-3 mr-1" />
-            Drag to rotate / Scroll to zoom
+            Drag to rotate · Scroll to zoom · Click a point
           </Badge>
         </div>
       </div>
 
-      {/* Sidebar */}
       <div className="w-80 p-4 flex flex-col gap-4">
         <Card>
           <CardHeader className="pb-2">
@@ -340,17 +311,11 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
           <CardContent className="p-0">
             <ScrollArea className="h-[calc(100%-3rem)] px-4 pb-4">
               <div className="space-y-2">
-                {clusterStats.map((cluster) => (
-                  <div 
-                    key={cluster.id} 
-                    className="p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer"
-                  >
+                {clusterStats.map(cluster => (
+                  <div key={cluster.id} className="p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-full" 
-                          style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }}
-                        />
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }} />
                         <span className="text-sm font-medium">Cluster {cluster.id}</span>
                       </div>
                       <Badge variant="secondary" className="text-xs">{cluster.sceneCount} scenes</Badge>
@@ -361,12 +326,9 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
                         <span className="font-medium">{Math.round(cluster.density * 100)}%</span>
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div 
+                        <div
                           className="h-full rounded-full transition-all"
-                          style={{ 
-                            width: `${cluster.density * 100}%`,
-                            backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
-                          }}
+                          style={{ width: `${Math.max(cluster.density * 100, 4)}%`, backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }}
                         />
                       </div>
                     </div>
@@ -378,13 +340,12 @@ export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: Cluste
         </Card>
       </div>
 
-      {/* Scene Modal */}
       <SceneModal
         scene={activeScene}
         loading={sceneLoading}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAnalyze={handleAnalyze}
+        onAnalyze={() => { if (activeScene) { onAnalyzeScene(activeScene); setModalOpen(false) } }}
       />
     </div>
   )

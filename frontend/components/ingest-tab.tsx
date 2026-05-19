@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Rocket, FolderOpen, CheckCircle2, XCircle, Loader2, ExternalLink } from 'lucide-react'
+import { Rocket, FolderOpen, CheckCircle2, XCircle, Loader2, ExternalLink, ChevronDown, ChevronUp, Terminal, Info, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,7 +26,7 @@ import type { BatchJob } from '@/lib/types'
 
 interface IngestTabProps {
   batchJobs: BatchJob[]
-  onLaunchBatch: (dataSourceUri: string, label: string, region: string) => void
+  onLaunchBatch: (dataSourceUri: string, label: string, region: string) => Promise<void>
   onViewClusterSpace: (batchId: string) => void
 }
 
@@ -37,19 +37,57 @@ const REGIONS = [
   { value: 'APAC', label: 'APAC (Tokyo, Singapore)' },
 ]
 
+const DATASET_EXAMPLES = [
+  {
+    name: 'Waymo Open Dataset',
+    uri: 'gs://waymo_open_dataset_v_2_0_1/validation/camera_image',
+    auth: 'gcloud auth application-default login',
+    note: 'Requires Waymo dataset access approval at waymo.com/open',
+  },
+  {
+    name: 'nuScenes (GCS mirror)',
+    uri: 'gs://your-bucket/nuscenes/v1.0-trainval/samples',
+    auth: 'gcloud auth application-default login',
+    note: 'Point at your org\'s GCS mirror of the nuScenes sample directory',
+  },
+  {
+    name: 'Custom GCS Dataset',
+    uri: 'gs://your-bucket/path/to/parquet-files',
+    auth: 'gcloud auth application-default login',
+    note: 'Any GCS path containing Parquet scene files',
+  },
+]
+
 export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: IngestTabProps) {
   const [dataSourceUri, setDataSourceUri] = useState('')
   const [batchLabel, setBatchLabel] = useState('')
   const [region, setRegion] = useState('')
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [pathError, setPathError] = useState<string | null>(null)
+  const [launching, setLaunching] = useState(false)
 
-  const canLaunch = dataSourceUri.trim() !== '' && batchLabel.trim() !== '' && region !== ''
+  const isValidGcsUri = (uri: string) => /^gs:\/\/[^/]+\/.+/.test(uri.trim())
+  const canLaunch = isValidGcsUri(dataSourceUri) && batchLabel.trim() !== '' && region !== '' && !launching
 
-  const handleLaunch = () => {
-    if (canLaunch) {
-      onLaunchBatch(dataSourceUri, batchLabel, region)
+  const handleUriChange = (val: string) => {
+    setDataSourceUri(val)
+    setPathError(null)
+  }
+
+  const handleLaunch = async () => {
+    if (!canLaunch) return
+    setLaunching(true)
+    setPathError(null)
+    try {
+      await onLaunchBatch(dataSourceUri, batchLabel, region)
       setDataSourceUri('')
       setBatchLabel('')
       setRegion('')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to launch batch.'
+      setPathError(msg)
+    } finally {
+      setLaunching(false)
     }
   }
 
@@ -109,6 +147,56 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
         </p>
       </div>
 
+      {/* Setup Instructions */}
+      <Card className="border-muted">
+        <CardHeader className="pb-0 pt-4 px-4">
+          <button
+            onClick={() => setSetupOpen(v => !v)}
+            className="flex items-center justify-between w-full text-left"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <Info className="w-4 h-4 text-muted-foreground" />
+              How to connect your dataset
+            </div>
+            {setupOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+        </CardHeader>
+        {setupOpen && (
+          <CardContent className="pt-4 space-y-4">
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>Verity reads scene data directly from GCS. The machine running the backend needs Google Cloud credentials — no credentials are entered here.</p>
+              <p className="font-medium text-foreground mt-2">One-time setup (run on the backend machine):</p>
+            </div>
+            <div className="bg-terminal-bg rounded-lg px-4 py-3 flex items-start gap-3">
+              <Terminal className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+              <pre className="text-terminal-text text-xs font-mono whitespace-pre-wrap">gcloud auth application-default login</pre>
+            </div>
+            <p className="text-xs text-muted-foreground">This writes credentials that the pipeline picks up automatically. Re-run every 60 days or use a service account key for production.</p>
+
+            <div className="border-t pt-4">
+              <p className="text-sm font-medium text-foreground mb-3">Supported datasets &amp; example URIs</p>
+              <div className="space-y-3">
+                {DATASET_EXAMPLES.map(ds => (
+                  <div key={ds.name} className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-foreground">{ds.name}</span>
+                      <button
+                        onClick={() => setDataSourceUri(ds.uri)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Use this
+                      </button>
+                    </div>
+                    <p className="text-xs font-mono text-muted-foreground">{ds.uri}</p>
+                    <p className="text-xs text-muted-foreground">{ds.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
       {/* Launch Form */}
       <Card>
         <CardContent className="pt-6">
@@ -122,15 +210,22 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                 <FolderOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   id="dataSource"
-                  placeholder="s3://bucket/path/to/scenes/ or gs://bucket/path/"
+                  placeholder="gs://your-bucket/path/to/parquet-files"
                   value={dataSourceUri}
-                  onChange={(e) => setDataSourceUri(e.target.value)}
-                  className="pl-10 font-mono text-sm"
+                  onChange={(e) => handleUriChange(e.target.value)}
+                  className={`pl-10 font-mono text-sm ${pathError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                S3, GCS, or Azure Blob URI containing processed scene data
-              </p>
+              {pathError ? (
+                <div className="flex items-start gap-2 text-destructive text-xs">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>{pathError}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  GCS path to the directory containing your dataset&apos;s Parquet scene files. See &ldquo;How to connect your dataset&rdquo; above for examples.
+                </p>
+              )}
             </div>
 
             {/* Batch Label and Region */}
@@ -166,14 +261,18 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
             </div>
 
             {/* Launch Button */}
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
               className="w-full sm:w-auto sm:self-end"
               onClick={handleLaunch}
               disabled={!canLaunch}
             >
-              <Rocket className="w-4 h-4 mr-2" />
-              Launch Batch
+              {launching ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Rocket className="w-4 h-4 mr-2" />
+              )}
+              {launching ? 'Validating path...' : 'Launch Batch'}
             </Button>
           </div>
         </CardContent>
