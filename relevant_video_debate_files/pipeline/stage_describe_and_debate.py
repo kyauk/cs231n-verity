@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import re
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -437,6 +439,36 @@ def _hf_chat_completion(
     return str(output_text[0]).strip() if output_text else ""
 
 
+def release_hf_model_cache() -> None:
+    """Unload the cached HF VLM so debate (NIM text) and optional follow-ups do not OOM."""
+
+    cache = getattr(_hf_chat_completion, "_cache", None)
+    if not cache:
+        return
+
+    model = cache.get("model")
+    processor = cache.get("processor")
+    setattr(_hf_chat_completion, "_cache", None)
+    del cache
+    try:
+        del model
+        del processor
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except Exception:  # noqa: BLE001
+        gc.collect()
+
+    print("[pipeline] Released HF VLM from GPU before debate stage.", flush=True)
+
+
 def _nim_text_chat_completion(messages: list[dict[str, Any]]) -> str:
     """
     Purpose: Run NVIDIA NIM text completion for debate turns.
@@ -461,19 +493,37 @@ def _nim_text_chat_completion(messages: list[dict[str, Any]]) -> str:
         "messages": messages,
         "temperature": temperature,
     }
-    response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=90,
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"NIM debate call failed: HTTP {response.status_code}: {response.text[:300]}")
-    body = response.json()
-    return str(body["choices"][0]["message"]["content"]).strip()
+    max_retries = max(1, int(os.getenv("DEBATE_NIM_MAX_RETRIES", "3")))
+    retryable_status = {429, 500, 502, 503, 504}
+    last_error = ""
+
+    for attempt in range(max_retries):
+        response = requests.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=90,
+        )
+        if response.status_code == 200:
+            body = response.json()
+            return str(body["choices"][0]["message"]["content"]).strip()
+
+        last_error = f"HTTP {response.status_code}: {response.text[:300]}"
+        if response.status_code in retryable_status and attempt < max_retries - 1:
+            delay = min(8.0, 1.5 * (2**attempt))
+            print(
+                f"[pipeline] NIM debate retry {attempt + 2}/{max_retries} "
+                f"after {delay:.1f}s ({last_error[:120]})",
+                flush=True,
+            )
+            time.sleep(delay)
+            continue
+        break
+
+    raise RuntimeError(f"NIM debate call failed: {last_error}")
 
 
 def _parse_strict_json_object(raw: str, stage_name: str) -> dict[str, Any]:
@@ -712,10 +762,21 @@ def build_debate_input(
     Calls: DebateInputRecord(), _severity_from_outlier()
     """
 
-    severity_hint = _severity_from_outlier(
-        float(description.metadata.get("outlier_score", 0.0)),
-        bool(description.metadata.get("is_noise", False)),
+    metadata = description.metadata or {}
+    nested = metadata.get("metadata") if isinstance(metadata.get("metadata"), dict) else {}
+    is_manual_upload = (
+        description.log_id == "manual_upload"
+        or bool(metadata.get("upload_source"))
+        or bool(nested.get("upload_source"))
     )
+    if is_manual_upload:
+        # Manual uploads have no real anomaly score; avoid priming debate as "critical".
+        severity_hint = "unknown"
+    else:
+        severity_hint = _severity_from_outlier(
+            float(metadata.get("outlier_score", 0.0)),
+            bool(metadata.get("is_noise", False)),
+        )
     return DebateInputRecord(
         run_id=description.run_id,
         window_id=description.window_id,
@@ -1067,6 +1128,8 @@ def main() -> int:
         "Scene description complete",
         f"Processed {len(description_outputs)} window(s). Starting debate stage…",
     )
+
+    release_hf_model_cache()
 
     debate_inputs = [build_debate_input(record, regression_suite) for record in description_outputs]
     debate_outputs: list[DebateOutputRecord] = []

@@ -15,6 +15,13 @@ import os
 from typing import Any
 
 from pipeline.actor_tools import DebateContext
+from pipeline.debate_scoring import (
+    apply_evidence_penalty,
+    compute_priority_score,
+    extract_max_suite_overlap,
+    scene_analyst_had_vlm_failures,
+    summarize_tool_evidence,
+)
 from pipeline.models.handoff_contracts import DebateInputRecord, DebateOutputRecord
 from pipeline.react_loop import ActorContribution, run_actor
 
@@ -45,12 +52,9 @@ SCENE_ANALYST_SYSTEM_PROMPT = (
     "struck a construction sign sitting in the travel lane and was deflected "
     "into the ego lane'), and pinpoint why this situation is a valuable AV "
     "regression edge case. "
-    "You have access to a vision-language model that can answer targeted "
-    "visual questions about the video. Use it to clarify ambiguous causal "
-    "details - ask about specific objects, positions, trajectories, which "
-    "vehicle moved first, visibility conditions, lane geometry, or "
-    "infrastructure elements. Prefer 1-3 well-targeted VLM queries over "
-    "lengthy speculation. "
+    "You may use vlm_followup sparingly (0-2 calls) to clarify critical causal "
+    "ambiguities; answers are drawn from the prior scene description unless "
+    "live GPU VLM is enabled. Prefer finishing over repeated tool calls. "
     "When finished, produce a JSON with keys: "
     "`failure_mode` (string: the real-world event / causal chain, e.g. "
     "'lead vehicle struck a misplaced construction sign on the highway and "
@@ -114,7 +118,8 @@ COVERAGE_ANALYST_SYSTEM_PROMPT = (
     "adding), "
     "`rebuttal_summary` (string: honest assessment of whether the "
     "counterarguments hold up or not, and on balance whether the scenario "
-    "fills a real coverage gap)."
+    "fills a real coverage gap). "
+    "When you are done, you MUST use Action: finish — never Action: None."
 )
 
 SYNTHESIS_ARBITER_SYSTEM_PROMPT = (
@@ -145,7 +150,8 @@ SYNTHESIS_ARBITER_SYSTEM_PROMPT = (
     "specification), "
     "`scenario_variants` (list of strings: perturbation variants to also "
     "test), "
-    "`confidence` (float 0-1: confidence in the decision), "
+    "`confidence` (float 0-1: how certain you are in the decision given the "
+    "evidence quality — lower if specialists disagreed or tools failed), "
     "`uncertainty_factors` (list of strings: what a human reviewer should "
     "verify)."
 )
@@ -177,12 +183,10 @@ def _build_scene_analyst_message(context: DebateContext) -> str:
         "Regression-value rationale (from prior VLM pass; why this clip may "
         f"matter for AV testing):\n{context.anomaly_rationale}\n\n"
         "Your task: reconstruct what actually happened in the world and why "
-        "an AV would find this hard. Use vlm_followup sparingly (1-3 "
-        "questions) to resolve the most important causal ambiguities (e.g. "
-        "which vehicle moved first, what object was in the lane, whether the "
-        "pedestrian entered from a crosswalk or jaywalked), then finish with "
-        "the required JSON. Do NOT question whether the footage is real, and "
-        "do NOT attribute events to glitches or unrealistic physics."
+        "an AV would find this hard. You may use vlm_followup at most twice "
+        "for critical ambiguities, then finish with the required JSON. Do NOT "
+        "question whether the footage is real, and do NOT attribute events "
+        "to glitches or unrealistic physics."
     )
 
 
@@ -294,6 +298,87 @@ _ARBITER_DECISION_MAP: dict[str, tuple[str, str]] = {
     "monitor": ("yes", "not_critical"),
     "dismiss": ("no", "already_covered"),
 }
+
+_SCENE_OUTPUT_KEYS = ("failure_mode", "why_valuable_for_regression", "evidence_summary")
+_RISK_OUTPUT_KEYS = ("risk_level", "affected_capability")
+_COVERAGE_OUTPUT_KEYS = ("counterarguments", "rebuttal_summary")
+
+
+def _actor_llm_failed(contribution: ActorContribution) -> bool:
+    for step in contribution.steps:
+        if step.thought and "llm_call raised exception" in step.thought:
+            return True
+    return False
+
+
+def _merge_actor_output(
+    contribution: ActorContribution,
+    required_keys: tuple[str, ...],
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    if _actor_llm_failed(contribution):
+        return dict(fallback)
+
+    output = dict(contribution.final_output or {})
+    if not all(key in output and output[key] not in (None, "", []) for key in required_keys):
+        merged = dict(fallback)
+        merged.update({key: value for key, value in output.items() if value not in (None, "")})
+        return merged
+    return output
+
+
+def _fallback_scene_output(record: DebateInputRecord) -> dict[str, Any]:
+    return {
+        "failure_mode": (record.anomaly_rationale or record.scene_description)[:600],
+        "why_valuable_for_regression": (record.anomaly_rationale or "Edge case for AV regression.")[
+            :600
+        ],
+        "evidence_summary": (record.scene_description or "See prior scene description.")[:600],
+    }
+
+
+def _fallback_risk_output(
+    context: DebateContext,
+    scene_output: dict[str, Any],
+) -> dict[str, Any]:
+    from pipeline.actor_tools import safety_taxonomy_lookup
+
+    query = str(
+        scene_output.get("failure_mode") or context.scene_description or context.anomaly_rationale
+    )[:240]
+    taxonomy_text = safety_taxonomy_lookup({"query": query}, context)
+    capability = "unspecified_capability"
+    for line in taxonomy_text.splitlines():
+        if "capability_tag=" in line:
+            capability = line.split("capability_tag=", 1)[1].split()[0].strip()
+            break
+
+    severity = str(context.severity_hint).strip().lower()
+    risk_level = {
+        "critical": "high",
+        "high": "high",
+        "medium": "medium",
+        "low": "low",
+        "unknown": "medium",
+    }.get(severity, "medium")
+
+    return {
+        "risk_level": risk_level,
+        "affected_capability": capability,
+        "affected_odds": [],
+    }
+
+
+def _fallback_coverage_output() -> dict[str, Any]:
+    return {
+        "counterarguments": [
+            "Coverage analysis did not complete; novelty versus the existing suite is uncertain."
+        ],
+        "rebuttal_summary": (
+            "Automated fallback: treat marginal coverage gain as unverified until "
+            "a human reviewer confirms suite overlap."
+        ),
+    }
 
 
 def _coerce_decision(raw_decision: Any) -> tuple[str, str, str]:
@@ -494,9 +579,21 @@ def run_tool_augmented_debate(
         llm_call=llm_call,
     )
 
-    scene_output = scene_contribution.final_output or {}
-    risk_output = risk_contribution.final_output or {}
-    coverage_output = coverage_contribution.final_output or {}
+    scene_output = _merge_actor_output(
+        scene_contribution,
+        _SCENE_OUTPUT_KEYS,
+        _fallback_scene_output(record),
+    )
+    risk_output = _merge_actor_output(
+        risk_contribution,
+        _RISK_OUTPUT_KEYS,
+        _fallback_risk_output(context, scene_output),
+    )
+    coverage_output = _merge_actor_output(
+        coverage_contribution,
+        _COVERAGE_OUTPUT_KEYS,
+        _fallback_coverage_output(),
+    )
     arbiter_output = arbiter_contribution.final_output or {}
 
     all_contributions = [
@@ -513,7 +610,25 @@ def run_tool_augmented_debate(
     proposal_decision, decision, recommendation = _coerce_decision(
         arbiter_output.get("decision")
     )
-    priority_score = _coerce_confidence(arbiter_output.get("confidence"))
+    arbiter_confidence = _coerce_confidence(arbiter_output.get("confidence"))
+    risk_level = str(risk_output.get("risk_level", "")).strip().lower() or "medium"
+
+    tool_evidence = summarize_tool_evidence(all_contributions)
+    max_suite_overlap = extract_max_suite_overlap([coverage_contribution])
+    had_vlm_failures = scene_analyst_had_vlm_failures(scene_contribution)
+
+    proposal_confidence = apply_evidence_penalty(
+        arbiter_confidence,
+        tool_failure_ratio=float(tool_evidence["tool_failure_ratio"]),
+        had_vlm_failures=had_vlm_failures,
+    )
+    priority_score = compute_priority_score(
+        proposal_decision=proposal_decision,
+        risk_level=risk_level,
+        severity_hint=str(record.severity_hint),
+        max_suite_overlap=max_suite_overlap,
+        tool_failure_ratio=float(tool_evidence["tool_failure_ratio"]),
+    )
 
     capability_tag = str(risk_output.get("affected_capability", "")).strip()
     if not capability_tag:
@@ -543,10 +658,20 @@ def run_tool_augmented_debate(
             "recommended_test_spec", ""
         ),
         "proposal_scenario_variants": arbiter_output.get("scenario_variants", []),
-        "proposal_confidence": priority_score,
+        "proposal_confidence": proposal_confidence,
         "proposal_uncertainty_factors": arbiter_output.get(
             "uncertainty_factors", []
         ),
+        "scoring": {
+            "arbiter_confidence_raw": arbiter_confidence,
+            "proposal_confidence": proposal_confidence,
+            "priority_score": priority_score,
+            "risk_level": risk_level,
+            "severity_hint": str(record.severity_hint),
+            "max_suite_overlap": max_suite_overlap,
+            "had_vlm_failures": had_vlm_failures,
+            **tool_evidence,
+        },
     }
 
     enriched_metadata = dict(record.metadata)

@@ -30,6 +30,21 @@ const FAST_PROFILE_MAX_NEW_TOKENS = process.env.WORKSPACE_MAX_NEW_TOKENS ?? "240
 const FAST_PROFILE_DEBATE_ROUNDS = process.env.WORKSPACE_DEBATE_ROUNDS ?? "2";
 
 type JsonRow = Record<string, unknown>;
+type UploadFile = Blob & { name: string };
+
+function as_upload_file(value: FormDataEntryValue | null): UploadFile | null {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "arrayBuffer" in value &&
+    typeof value.arrayBuffer === "function" &&
+    "name" in value &&
+    typeof value.name === "string"
+  ) {
+    return value as UploadFile;
+  }
+  return null;
+}
 
 function sanitize_filename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -219,7 +234,7 @@ async function resolve_python_bin(): Promise<string> {
   }
 }
 
-async function forward_remote_stream(file: File): Promise<Response> {
+async function forward_remote_stream(file: UploadFile): Promise<Response> {
   const form = new FormData();
   form.append("video", file, file.name);
 
@@ -259,8 +274,8 @@ async function forward_remote_stream(file: File): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   const form_data = await request.formData();
-  const file = form_data.get("video");
-  if (!(file instanceof File)) {
+  const file = as_upload_file(form_data.get("video"));
+  if (!file) {
     return NextResponse.json({ detail: "Missing video file." }, { status: 400 });
   }
 
@@ -298,10 +313,10 @@ export async function POST(request: Request): Promise<Response> {
     window_start_ts: 0,
     window_end_ts: 0,
     cluster_label: -1,
-    is_noise: true,
+    is_noise: false,
     cluster_probability: 0.0,
-    outlier_score: 0.9,
-    anomaly_rank: 1,
+    outlier_score: 0.0,
+    anomaly_rank: 0,
     quality: {},
     metadata: {
       upload_source: "frontend_stream"

@@ -72,6 +72,8 @@ Action Input: <JSON object - tool input dict OR your final structured output>
 
 When you have enough information, use Action: finish and put your final answer as a JSON object in Action Input.
 
+Never use Action: None, Action: null, or a blank action. When you are done, you MUST use Action: finish.
+
 Do NOT include any text outside of this Thought/Action/Action Input format.
 """.strip()
 
@@ -79,6 +81,8 @@ Do NOT include any text outside of this Thought/Action/Action Input format.
 _THOUGHT_RE = re.compile(r"Thought:\s*(.+?)(?=\nAction:)", re.DOTALL)
 _ACTION_RE = re.compile(r"Action:\s*(.+?)(?=\nAction Input:)", re.DOTALL)
 _ACTION_INPUT_RE = re.compile(r"Action Input:\s*(.+)", re.DOTALL)
+
+_INVALID_ACTION_NAMES = frozenset({"none", "null", "n/a", "na", ""})
 
 
 def _build_tool_block(available_tools: list[str]) -> str:
@@ -225,12 +229,19 @@ def run_actor(
     last_raw_output = ""
 
     for _step_index in range(max_steps):
-        try:
-            raw_output = llm_call(messages)
-        except Exception as error:  # noqa: BLE001
+        raw_output = ""
+        llm_error: Exception | None = None
+        for llm_attempt in range(2):
+            try:
+                raw_output = llm_call(messages)
+                llm_error = None
+                break
+            except Exception as error:  # noqa: BLE001
+                llm_error = error
+        if llm_error is not None:
             steps.append(
                 ActorStep(
-                    thought=f"[llm_call raised exception: {error}]",
+                    thought=f"[llm_call raised exception: {llm_error}]",
                     tool_call=None,
                     observation=None,
                 )
@@ -263,7 +274,29 @@ def run_actor(
             )
             continue
 
-        if action.lower() == "finish":
+        action_normalized = action.strip().lower()
+        if action_normalized in _INVALID_ACTION_NAMES:
+            observation = (
+                "Invalid action. When you are done, use Action: finish with your "
+                f"final JSON object. Otherwise choose one of: {available_tools}"
+            )
+            steps.append(
+                ActorStep(
+                    thought=thought or "",
+                    tool_call=None,
+                    observation=observation,
+                )
+            )
+            messages.append({"role": "assistant", "content": raw_output})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Observation: {observation}\n\nContinue with your next Thought.",
+                }
+            )
+            continue
+
+        if action_normalized == "finish":
             parsed_input, parse_error = _parse_action_input_json(action_input_raw or "")
             if parsed_input is None:
                 steps.append(

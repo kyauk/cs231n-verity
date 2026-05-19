@@ -277,25 +277,50 @@ SAFETY_TAXONOMY: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
-def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
-    """Ask the Cosmos VLM a targeted follow-up question about the media.
+def _vlm_followup_enabled() -> bool:
+    return os.getenv("REACT_ENABLE_VLM_FOLLOWUP", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
-    Rebuilds the media/video message structure used by the description stage
-    and appends the actor's question as a final text block, then delegates to
-    the shared ``_hf_chat_completion`` entry point.
-    """
 
-    question = str(tool_input.get("question", "")).strip()
-    if not question:
-        return "vlm_followup error: missing non-empty 'question' in tool input."
+def _vlm_followup_via_text(question: str, context: DebateContext) -> str:
+    """Answer a visual follow-up using the prior description (no GPU VLM reload)."""
 
-    if not context.media_refs:
-        return (
-            "vlm_followup error: no media attached to this window; cannot "
-            "answer a visual question."
-        )
+    from pipeline.stage_describe_and_debate import _nim_text_chat_completion
 
-    # Local import to avoid circular import at module load time.
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                "You answer targeted questions about a REAL driving scene using "
+                "only the prior scene description and regression rationale below. "
+                "You do not have live video access in this step. Be concise "
+                "(<=80 words). If the text does not support an answer, say what "
+                "is missing rather than guessing."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Scene description:\n{context.scene_description}\n\n"
+                f"Regression-value rationale:\n{context.anomaly_rationale}\n\n"
+                f"Question: {question}"
+            ),
+        },
+    ]
+    try:
+        answer = _nim_text_chat_completion(messages).strip()
+    except Exception as error:  # noqa: BLE001
+        return f"vlm_followup error: {error}"
+    return f"[text-only] {answer}"
+
+
+def _vlm_followup_via_gpu(question: str, context: DebateContext) -> str:
+    """Run a live VLM follow-up (reloads HF model; only when explicitly enabled)."""
+
     from pipeline.stage_describe_and_debate import _hf_chat_completion
 
     media_blocks: list[dict[str, Any]] = []
@@ -316,6 +341,7 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
         )
 
     media_blocks.append({"type": "text", "text": question})
+    max_tokens = int(os.getenv("REACT_VLM_FOLLOWUP_MAX_NEW_TOKENS", "512"))
 
     messages: list[dict[str, Any]] = [
         {
@@ -323,25 +349,51 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
             "content": (
                 "You are a vision-language assistant answering targeted "
                 "follow-up questions about a REAL recorded autonomous-driving "
-                "scene. The video is genuine fleet footage - do NOT speculate "
-                "about whether it is fake, edited, or staged. Do NOT explain "
-                "sudden motion, debris, or collisions as glitches, unrealistic "
-                "physics, or rendering errors; infer real-world causes or say "
-                "the precursor is not visible. Describe what you actually see: "
-                "agents (vehicles, pedestrians, cyclists, infrastructure), "
-                "their positions and trajectories, the likely cause of any "
-                "incident, and environmental conditions. "
-                "Answer concisely (<=80 words) grounded strictly in what is "
-                "visible. If a specific detail is not visually evident, say "
-                "so explicitly rather than guessing."
+                "scene. Answer concisely (<=80 words) grounded in what is visible."
             ),
         },
         {"role": "user", "content": media_blocks},
     ]
 
+    return _hf_chat_completion(
+        messages=messages,
+        max_new_tokens_override=max_tokens,
+    ).strip()
+
+
+def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
+    """Ask a targeted follow-up about the scene (text-only by default; optional GPU VLM)."""
+
+    question = str(tool_input.get("question", "")).strip()
+    if not question:
+        return "vlm_followup error: missing non-empty 'question' in tool input."
+
+    if not context.media_refs and not context.scene_description.strip():
+        return (
+            "vlm_followup error: no media or prior scene description available."
+        )
+
+    if not _vlm_followup_enabled():
+        return _vlm_followup_via_text(question, context)
+
     try:
-        return _hf_chat_completion(messages=messages).strip()
+        import torch  # type: ignore[import-not-found]
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        return _vlm_followup_via_gpu(question, context)
     except Exception as error:  # noqa: BLE001
+        error_text = str(error).lower()
+        if "out of memory" in error_text or "cuda" in error_text:
+            text_answer = _vlm_followup_via_text(question, context)
+            return (
+                f"{text_answer} "
+                "(GPU VLM unavailable after OOM; answered from prior description.)"
+            )
         return f"vlm_followup error: {error}"
 
 
@@ -487,7 +539,8 @@ def execute_tool(
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "vlm_followup": (
-        "Ask a targeted visual question about the video/image. "
+        "Ask a targeted question about the scene (answered from the prior "
+        "scene description unless REACT_ENABLE_VLM_FOLLOWUP=1). "
         'Input: {"question": "your question"}'
     ),
     "safety_taxonomy_lookup": (
