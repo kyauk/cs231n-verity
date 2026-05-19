@@ -9,8 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Play, X, Maximize2 } from 'lucide-react'
+import { Play, X, Maximize2, Loader2, ScatterChart } from 'lucide-react'
 import type { ClusterPoint, ClusterStats, Scene } from '@/lib/types'
+import { fetchScene } from '@/lib/api'
 
 // Cluster colors
 const CLUSTER_COLORS = [
@@ -101,33 +102,52 @@ function Grid() {
 }
 
 interface SceneModalProps {
-  scene: Scene
+  scene: Scene | null
+  loading: boolean
   open: boolean
   onClose: () => void
   onAnalyze: () => void
 }
 
-function SceneModal({ scene, open, onClose, onAnalyze }: SceneModalProps) {
+function SceneModal({ scene, loading, open, onClose, onAnalyze }: SceneModalProps) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Scene Details
-            <Badge variant="outline" className="font-mono text-xs">{scene.id}</Badge>
+            <Badge variant="outline" className="font-mono text-xs">{scene?.id ?? '—'}</Badge>
           </DialogTitle>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           {/* Video Preview */}
           <div className="aspect-video bg-muted rounded-lg flex items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-muted to-muted/50" />
-            <div className="relative z-10 text-center">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                <Play className="w-8 h-8 text-primary" />
-              </div>
-              <p className="text-sm text-muted-foreground">Video Preview</p>
-            </div>
+            {scene?.videoUrl ? (
+              <video
+                key={scene.videoUrl}
+                src={scene.videoUrl}
+                controls
+                playsInline
+                className="absolute inset-0 w-full h-full object-contain bg-black"
+              />
+            ) : (
+              <>
+                <div className="absolute inset-0 bg-gradient-to-br from-muted to-muted/50" />
+                <div className="relative z-10 text-center">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
+                    {loading ? (
+                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                    ) : (
+                      <Play className="w-8 h-8 text-primary" />
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {loading ? 'Loading scene…' : 'Video Preview'}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Annotations */}
@@ -137,35 +157,35 @@ function SceneModal({ scene, open, onClose, onAnalyze }: SceneModalProps) {
               <div className="space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Weather</span>
-                  <span className="font-medium">{scene.annotations.weather}</span>
+                  <span className="font-medium">{scene?.annotations.weather ?? '—'}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Time of Day</span>
-                  <span className="font-medium">{scene.annotations.timeOfDay}</span>
+                  <span className="font-medium">{scene?.annotations.timeOfDay ?? '—'}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Road Type</span>
-                  <span className="font-medium">{scene.annotations.roadType}</span>
+                  <span className="font-medium">{scene?.annotations.roadType ?? '—'}</span>
                 </div>
               </div>
             </div>
             <div>
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Actors</h4>
               <div className="flex flex-wrap gap-1">
-                {scene.annotations.actors.map((actor) => (
+                {(scene?.annotations.actors ?? []).map((actor) => (
                   <Badge key={actor} variant="secondary" className="text-xs">{actor}</Badge>
                 ))}
               </div>
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 mt-3">Events</h4>
               <div className="flex flex-wrap gap-1">
-                {scene.annotations.events.map((event) => (
+                {(scene?.annotations.events ?? []).map((event) => (
                   <Badge key={event} variant="outline" className="text-xs">{event}</Badge>
                 ))}
               </div>
             </div>
           </div>
 
-          <Button className="w-full" onClick={onAnalyze}>
+          <Button className="w-full" onClick={onAnalyze} disabled={loading || !scene}>
             <Play className="w-4 h-4 mr-2" />
             Analyze this scene
           </Button>
@@ -178,28 +198,66 @@ function SceneModal({ scene, open, onClose, onAnalyze }: SceneModalProps) {
 interface ClusterSpaceTabProps {
   points: ClusterPoint[]
   clusterStats: ClusterStats[]
-  scene: Scene
-  onAnalyzeScene: (sceneId: string) => void
+  onAnalyzeScene: (scene: Scene) => void
 }
 
-export function ClusterSpaceTab({ points, clusterStats, scene, onAnalyzeScene }: ClusterSpaceTabProps) {
+export function ClusterSpaceTab({ points, clusterStats, onAnalyzeScene }: ClusterSpaceTabProps) {
   const [selectedPoint, setSelectedPoint] = useState<ClusterPoint | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [activeScene, setActiveScene] = useState<Scene | null>(null)
+  const [sceneLoading, setSceneLoading] = useState(false)
 
   const totalScenes = points.length
   const noiseCount = points.filter(p => p.isNoise).length
   const clusterCount = clusterStats.length
 
-  const handlePointClick = (point: ClusterPoint) => {
+  const handlePointClick = async (point: ClusterPoint) => {
     setSelectedPoint(point)
+    setActiveScene(null)
     setModalOpen(true)
+    setSceneLoading(true)
+    try {
+      setActiveScene(await fetchScene(point.sceneId))
+    } catch {
+      // Runner offline — fall back to a minimal scene so the modal still works.
+      setActiveScene({
+        id: point.sceneId,
+        videoUrl: '',
+        thumbnail: '',
+        annotations: {
+          weather: 'Unknown',
+          timeOfDay: 'Unknown',
+          roadType: 'Unknown',
+          actors: [],
+          events: [],
+        },
+      })
+    } finally {
+      setSceneLoading(false)
+    }
   }
 
   const handleAnalyze = () => {
-    if (selectedPoint) {
-      onAnalyzeScene(selectedPoint.sceneId)
+    if (activeScene) {
+      onAnalyzeScene(activeScene)
       setModalOpen(false)
     }
+  }
+
+  if (points.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-12">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <ScatterChart className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">No Cluster Data Yet</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Ingest a Waymo batch and wait for it to complete — clusters will appear here once embeddings are ready.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -321,8 +379,9 @@ export function ClusterSpaceTab({ points, clusterStats, scene, onAnalyzeScene }:
       </div>
 
       {/* Scene Modal */}
-      <SceneModal 
-        scene={scene}
+      <SceneModal
+        scene={activeScene}
+        loading={sceneLoading}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onAnalyze={handleAnalyze}

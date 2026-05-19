@@ -4,17 +4,20 @@ import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Play, CheckCircle2, Circle, Loader2, Sparkles, Gavel, MessageSquareWarning } from 'lucide-react'
+import { Play, CheckCircle2, Circle, Loader2, Sparkles, Gavel, MessageSquareWarning, MousePointerClick } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Scene, AgentStep, AnalysisResult } from '@/lib/types'
+import { runAnalysisStream, ApiError } from '@/lib/api'
 
 interface AnalysisTabProps {
-  scene: Scene
-  agentOutputs: {
-    proposer: string
-    critic: string
-    judge: string
-  }
+  scene: Scene | null
+}
+
+// Maps a pipeline progress `step` to the index of the agent it belongs to.
+function stepToAgentIndex(step: string): number {
+  if (step.startsWith('debate_judge')) return 2
+  if (step.startsWith('debate')) return 0 // proponent/critic rounds light up step 1+
+  return -1
 }
 
 const AGENT_ICONS = {
@@ -23,7 +26,7 @@ const AGENT_ICONS = {
   judge: Gavel,
 }
 
-export function AnalysisTab({ scene, agentOutputs }: AnalysisTabProps) {
+export function AnalysisTab({ scene }: AnalysisTabProps) {
   const [isRunning, setIsRunning] = useState(false)
   const [steps, setSteps] = useState<AgentStep[]>([
     { id: 'proposer', name: 'Proposer Agent', status: 'pending', output: '' },
@@ -31,73 +34,64 @@ export function AnalysisTab({ scene, agentOutputs }: AnalysisTabProps) {
     { id: 'judge', name: 'Judge Agent', status: 'pending', output: '' },
   ])
   const [conclusion, setConclusion] = useState<AnalysisResult | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const terminalRefs = useRef<(HTMLDivElement | null)[]>([])
 
-  // Simulate streaming text
-  const streamText = (text: string, onUpdate: (partial: string) => void, onComplete: () => void) => {
-    let index = 0
-    const interval = setInterval(() => {
-      if (index < text.length) {
-        const chunkSize = Math.floor(Math.random() * 3) + 1
-        index = Math.min(index + chunkSize, text.length)
-        onUpdate(text.slice(0, index))
-      } else {
-        clearInterval(interval)
-        onComplete()
-      }
-    }, 15)
-    return () => clearInterval(interval)
-  }
+  const resetSteps = (): AgentStep[] => [
+    { id: 'proposer', name: 'Proposer Agent', status: 'pending', output: '' },
+    { id: 'critic', name: 'Critic Agent', status: 'pending', output: '' },
+    { id: 'judge', name: 'Judge Agent', status: 'pending', output: '' },
+  ]
 
   const runAnalysis = async () => {
+    if (!scene) return
     setIsRunning(true)
     setConclusion(null)
-    setSteps([
-      { id: 'proposer', name: 'Proposer Agent', status: 'pending', output: '' },
-      { id: 'critic', name: 'Critic Agent', status: 'pending', output: '' },
-      { id: 'judge', name: 'Judge Agent', status: 'pending', output: '' },
-    ])
+    setErrorMessage(null)
+    setSteps(resetSteps())
 
-    const outputs = ['proposer', 'critic', 'judge'] as const
-
-    for (let i = 0; i < outputs.length; i++) {
-      const agentId = outputs[i]
-      
-      // Set current step to running
-      setSteps(prev => prev.map((s, idx) => 
-        idx === i ? { ...s, status: 'running' } : s
-      ))
-
-      await new Promise<void>((resolve) => {
-        streamText(
-          agentOutputs[agentId],
-          (partial) => {
-            setSteps(prev => prev.map((s, idx) => 
-              idx === i ? { ...s, output: partial } : s
-            ))
-          },
-          () => {
-            setSteps(prev => prev.map((s, idx) => 
-              idx === i ? { ...s, status: 'complete' } : s
-            ))
-            resolve()
-          }
+    try {
+      const result = await runAnalysisStream(scene.id, (progress) => {
+        // Progress events keep the stepper alive while the pipeline runs.
+        const agentIdx = stepToAgentIndex(progress.step)
+        setSteps(prev =>
+          prev.map((s, idx) => {
+            if (progress.step === 'debate_judge' && idx === 2) {
+              return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
+            }
+            if (agentIdx === 0 && progress.step.startsWith('debate_round')) {
+              // Proponent + critic share rounds; light steps 0 and 1.
+              const target = progress.detail.toLowerCase().includes('critic') ? 1 : 0
+              if (idx === target) {
+                return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
+              }
+            }
+            return s
+          }),
         )
       })
 
-      // Small delay between agents
-      await new Promise(r => setTimeout(r, 500))
+      // Populate each agent terminal with its real transcript.
+      setSteps([
+        { id: 'proposer', name: 'Proposer Agent', status: 'complete', output: result.agentOutputs.proposer },
+        { id: 'critic', name: 'Critic Agent', status: 'complete', output: result.agentOutputs.critic },
+        { id: 'judge', name: 'Judge Agent', status: 'complete', output: result.agentOutputs.judge },
+      ])
+
+      setConclusion({
+        sceneId: result.conclusion.sceneId,
+        verdict: result.conclusion.verdict,
+        priorityScore: result.conclusion.priorityScore,
+        simulationSpec: result.conclusion.simulationSpec,
+      })
+    } catch (error) {
+      const message =
+        error instanceof ApiError ? error.message : 'Analysis failed to run.'
+      setErrorMessage(message)
+      setSteps(resetSteps())
+    } finally {
+      setIsRunning(false)
     }
-
-    // Show conclusion
-    setConclusion({
-      sceneId: scene.id,
-      verdict: 'PRIORITY SCENARIO',
-      priorityScore: 92,
-      simulationSpec: 'Highway merge with aggressive cut-in and sensor degradation. Generated OpenSCENARIO 2.0 specification with modified rain model and wind gust perturbations.',
-    })
-
-    setIsRunning(false)
   }
 
   // Auto-scroll terminals
@@ -118,6 +112,22 @@ export function AnalysisTab({ scene, agentOutputs }: AnalysisTabProps) {
       case 'complete':
         return <CheckCircle2 className="w-5 h-5 text-primary" />
     }
+  }
+
+  if (!scene) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-12">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <MousePointerClick className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">No Scene Selected</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Go to Cluster Space, click a point, and choose &ldquo;Analyze this scene&rdquo; to begin.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -232,6 +242,21 @@ export function AnalysisTab({ scene, agentOutputs }: AnalysisTabProps) {
           )
         })}
       </div>
+
+      {/* Error */}
+      {errorMessage && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2 text-destructive">
+              <MessageSquareWarning className="w-5 h-5" />
+              Analysis Failed
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">{errorMessage}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Conclusion */}
       {conclusion && (

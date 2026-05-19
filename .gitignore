@@ -11,3 +11,9 @@ pipeline/models/__pycache__/
 pipeline/render_window_clip.py
 pipeline/visualize_embeddings.py
 .claude/
+waymo-pipeline/store/
+waymo-pipeline/__pycache__/
+waymo-pipeline/models/__pycache__/
+frontend/.env.local
+frontend/node_modules/
+frontend/.next/

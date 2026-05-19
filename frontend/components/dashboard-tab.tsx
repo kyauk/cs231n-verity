@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { FileSearch, AlertTriangle, FileCode, Flag, Eye } from 'lucide-react'
+import { FileSearch, AlertTriangle, FileCode, Flag, Eye, LayoutDashboard } from 'lucide-react'
 import type { FlaggedScenario } from '@/lib/types'
 
 interface DashboardTabProps {
@@ -46,6 +46,22 @@ export function DashboardTab({ scenarios, onViewScenario }: DashboardTabProps) {
     if (score >= 80) return 'bg-amber-500 text-white'
     if (score >= 70) return 'bg-blue-500 text-white'
     return 'bg-muted text-muted-foreground'
+  }
+
+  if (scenarios.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-12">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <LayoutDashboard className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">No Scenarios Yet</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Run agentic analysis on scenes from Cluster Space — flagged scenarios will appear here.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
