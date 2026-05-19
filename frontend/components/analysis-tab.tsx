@@ -4,10 +4,26 @@ import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Play, CheckCircle2, Circle, Loader2, Sparkles, Gavel, MessageSquareWarning, MousePointerClick } from 'lucide-react'
+import { Play, CheckCircle2, Circle, Loader2, Sparkles, Gavel, MessageSquareWarning, MousePointerClick, History, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Scene, AgentStep, AnalysisResult } from '@/lib/types'
+import type { Scene, AgentStep, AnalysisResult, AnalysisHistoryEntry } from '@/lib/types'
 import { runAnalysisStream, ApiError } from '@/lib/api'
+
+const HISTORY_KEY = (sceneId: string) => `verity:analysis-history:${sceneId}`
+
+function loadHistory(sceneId: string): AnalysisHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY(sceneId))
+    return raw ? (JSON.parse(raw) as AnalysisHistoryEntry[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(sceneId: string, entry: AnalysisHistoryEntry) {
+  const existing = loadHistory(sceneId)
+  localStorage.setItem(HISTORY_KEY(sceneId), JSON.stringify([entry, ...existing].slice(0, 20)))
+}
 
 interface AnalysisTabProps {
   scene: Scene | null
@@ -35,7 +51,14 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
   ])
   const [conclusion, setConclusion] = useState<AnalysisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<AnalysisHistoryEntry[]>([])
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null)
   const terminalRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  useEffect(() => {
+    if (scene) setHistory(loadHistory(scene.id))
+  }, [scene])
 
   const resetSteps = (): AgentStep[] => [
     { id: 'proposer', name: 'Proposer Agent', status: 'pending', output: '' },
@@ -78,12 +101,25 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
         { id: 'judge', name: 'Judge Agent', status: 'complete', output: result.agentOutputs.judge },
       ])
 
-      setConclusion({
+      const conclusionData = {
         sceneId: result.conclusion.sceneId,
         verdict: result.conclusion.verdict,
         priorityScore: result.conclusion.priorityScore,
         simulationSpec: result.conclusion.simulationSpec,
-      })
+      }
+      setConclusion(conclusionData)
+
+      const entry: AnalysisHistoryEntry = {
+        id: crypto.randomUUID(),
+        sceneId: scene.id,
+        ranAt: new Date().toISOString(),
+        verdict: conclusionData.verdict,
+        priorityScore: conclusionData.priorityScore,
+        simulationSpec: conclusionData.simulationSpec,
+        agentOutputs: result.agentOutputs,
+      }
+      saveHistory(scene.id, entry)
+      setHistory(loadHistory(scene.id))
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : 'Analysis failed to run.'
@@ -138,11 +174,75 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
           <h2 className="text-xl font-semibold text-foreground">Agentic Analysis</h2>
           <p className="text-sm text-muted-foreground">Multi-agent debate for adversarial scenario generation</p>
         </div>
-        <Button onClick={runAnalysis} disabled={isRunning}>
-          <Play className="w-4 h-4 mr-2" />
-          Generate Analysis
-        </Button>
+        <div className="flex items-center gap-2">
+          {history.length > 0 && (
+            <Button variant="outline" onClick={() => setHistoryOpen(v => !v)}>
+              <History className="w-4 h-4 mr-2" />
+              History ({history.length})
+            </Button>
+          )}
+          <Button onClick={runAnalysis} disabled={isRunning}>
+            {isRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+            {isRunning ? 'Running...' : 'Generate Analysis'}
+          </Button>
+        </div>
       </div>
+
+      {/* History Panel */}
+      {historyOpen && (
+        <Card className="border-muted">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <History className="w-4 h-4 text-muted-foreground" />
+                Past Analyses — {scene.id}
+              </CardTitle>
+              <button onClick={() => setHistoryOpen(false)}>
+                <X className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 space-y-2">
+            {history.map(entry => (
+              <div key={entry.id} className="rounded-lg border bg-muted/20 overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+                  onClick={() => setExpandedHistory(expandedHistory === entry.id ? null : entry.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <Badge className="bg-primary/10 text-primary border-primary/20 font-mono text-xs">
+                      {entry.priorityScore}/100
+                    </Badge>
+                    <span className="text-sm font-medium">{entry.verdict}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(entry.ranAt).toLocaleString()}
+                    </span>
+                  </div>
+                  {expandedHistory === entry.id
+                    ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+                    : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+                </button>
+                {expandedHistory === entry.id && (
+                  <div className="px-3 pb-3 space-y-2 border-t pt-2">
+                    <p className="text-xs text-muted-foreground">{entry.simulationSpec}</p>
+                    {(['proposer', 'critic', 'judge'] as const).map(agent => (
+                      entry.agentOutputs[agent] && (
+                        <div key={agent}>
+                          <p className="text-xs font-medium capitalize text-muted-foreground mb-1">{agent}</p>
+                          <div className="rounded p-2 font-mono text-xs overflow-auto max-h-32"
+                            style={{ backgroundColor: 'oklch(0.15 0.02 240)', color: 'oklch(0.65 0.2 125)' }}>
+                            <pre className="whitespace-pre-wrap">{entry.agentOutputs[agent]}</pre>
+                          </div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scene Preview */}
       <Card>
@@ -219,25 +319,24 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
                 </div>
               </CardHeader>
               <CardContent>
-                <div
-                  ref={el => { terminalRefs.current[index] = el }}
-                  className={cn(
-                    'rounded-lg p-4 font-mono text-sm h-40 overflow-auto',
-                    step.status === 'pending' && 'opacity-50'
-                  )}
-                  style={{ backgroundColor: 'oklch(0.15 0.02 240)' }}
-                >
-                  {step.output ? (
+                {step.status === 'pending' ? (
+                  <div className="rounded-lg border border-dashed border-muted-foreground/20 h-40 flex items-center justify-center">
+                    <p className="text-xs text-muted-foreground/40 italic">Waiting for previous step...</p>
+                  </div>
+                ) : (
+                  <div
+                    ref={el => { terminalRefs.current[index] = el }}
+                    className="rounded-lg p-4 font-mono text-sm h-40 overflow-auto"
+                    style={{ backgroundColor: 'oklch(0.15 0.02 240)' }}
+                  >
                     <pre className="whitespace-pre-wrap" style={{ color: 'oklch(0.65 0.2 125)' }}>
                       {step.output}
                       {step.status === 'running' && (
                         <span className="inline-block w-2 h-4 bg-terminal-text ml-0.5 animate-blink" />
                       )}
                     </pre>
-                  ) : (
-                    <p className="text-muted-foreground/50 italic">Waiting for previous step...</p>
-                  )}
-                </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )

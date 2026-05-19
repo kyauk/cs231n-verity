@@ -53,6 +53,20 @@ export interface AnalysisResult {
   simulationSpec: string
 }
 
+export interface AnalysisHistoryEntry {
+  id: string
+  sceneId: string
+  ranAt: string
+  verdict: string
+  priorityScore: number
+  simulationSpec: string
+  agentOutputs: {
+    proposer: string
+    critic: string
+    judge: string
+  }
+}
+
 export interface FlaggedScenario {
   id: string
   scenarioName: string
