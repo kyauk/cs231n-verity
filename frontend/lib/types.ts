@@ -76,3 +76,59 @@ export interface FlaggedScenario {
   hasSimulationSpec: boolean
   region: string
 }
+
+// ---------------------------------------------------------------------------
+// Module 5: Judge UI types
+// ---------------------------------------------------------------------------
+
+export interface JudgeScoreBadges {
+  novelty_score: number
+  plausibility_score: number
+  frontier_difficulty_score: number | null
+  final_rank_score: number
+}
+
+export interface JudgeMotivatingScene {
+  segment_id: string
+  window_idx: number
+}
+
+export interface JudgeProposalRow {
+  proposal_id: string
+  constituents: string[]
+  scores: JudgeScoreBadges
+  motivating_scene_count: number
+}
+
+export interface JudgeProposalDetail {
+  proposal_id: string
+  constituents: string[]
+  scores: JudgeScoreBadges
+  plausibility_justification: string
+  motivating_scenes: JudgeMotivatingScene[]
+  rejection_reason: string | null
+}
+
+export interface JudgeVideoUrl {
+  url: string
+  generated_at: string
+}
+
+export interface JudgeRatingSubmission {
+  rater_id: string
+  proposal_id: string
+  coherence_score: number
+  usefulness_score: number
+  free_text_note: string | null
+  seen_motivating_scenes: JudgeMotivatingScene[]
+}
+
+export interface JudgeSessionSummary {
+  rater_id: string
+  rated_proposal_ids: string[]
+  total_accepted: number
+  coherence_distribution: Record<number, number>
+  usefulness_distribution: Record<number, number>
+  mean_coherence: number | null
+  mean_usefulness: number | null
+}

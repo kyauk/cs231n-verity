@@ -76,8 +76,16 @@ function Grid({ axisLen }: { axisLen: number }) {
 function CameraFit({ points }: { points: ClusterPoint[] }) {
   const { camera, controls } = useThree() as any
   const fitted = useRef(false)
+  const prevLengthRef = useRef(points.length)
 
   useEffect(() => {
+    // Re-fit when a previously empty scene receives its first batch of points
+    // (e.g. a batch completes while the user is on this tab).
+    if (prevLengthRef.current === 0 && points.length > 0) {
+      fitted.current = false
+    }
+    prevLengthRef.current = points.length
+
     if (fitted.current || points.length === 0 || !controls) return
     fitted.current = true
 

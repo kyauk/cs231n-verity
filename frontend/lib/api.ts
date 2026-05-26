@@ -13,10 +13,18 @@ import type {
   ClusterStats,
   Scene,
   FlaggedScenario,
+  JudgeProposalRow,
+  JudgeProposalDetail,
+  JudgeVideoUrl,
+  JudgeRatingSubmission,
+  JudgeSessionSummary,
 } from './types'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+const JUDGE_API_URL =
+  process.env.NEXT_PUBLIC_JUDGE_API_URL ?? 'http://localhost:8001'
 
 export class ApiError extends Error {
   status: number
@@ -191,6 +199,10 @@ export async function runAnalysisStream(
   let buffer = ''
   let completed: AnalysisResultPayload | null = null
 
+  // Accumulate any SSE error so it can be thrown after the stream drains,
+  // rather than inside processBlocks where it would abandon buffered bytes.
+  let sseError: ApiError | null = null
+
   const processBlocks = (): void => {
     let sep: number
     while ((sep = buffer.indexOf('\n\n')) >= 0) {
@@ -215,11 +227,10 @@ export async function runAnalysisStream(
           })
         }
       } else if (parsed.kind === 'error') {
-        const detail =
-          typeof parsed.detail === 'string'
-            ? parsed.detail
-            : 'Analysis failed.'
-        throw new ApiError(detail, 500)
+        sseError = new ApiError(
+          typeof parsed.detail === 'string' ? parsed.detail : 'Analysis failed.',
+          500,
+        )
       } else if (parsed.kind === 'complete' && parsed.ok === true) {
         completed = {
           sceneId: String(parsed.sceneId ?? ''),
@@ -244,8 +255,60 @@ export async function runAnalysisStream(
     }
   }
 
+  if (sseError) throw sseError
+
   if (!completed) {
     throw new ApiError('Stream ended without a complete event.', 500)
   }
   return completed
+}
+
+/* ------------------------------------------------------------------ */
+/* Judge UI tab (Module 5)                                             */
+/* ------------------------------------------------------------------ */
+
+export async function fetchJudgeProposals(): Promise<JudgeProposalRow[]> {
+  const response = await fetch(`${JUDGE_API_URL}/judge/proposals`, { cache: 'no-store' })
+  return parseResponse<JudgeProposalRow[]>(response)
+}
+
+export async function fetchJudgeProposalDetail(proposalId: string): Promise<JudgeProposalDetail> {
+  const response = await fetch(
+    `${JUDGE_API_URL}/judge/proposals/${encodeURIComponent(proposalId)}`,
+    { cache: 'no-store' },
+  )
+  return parseResponse<JudgeProposalDetail>(response)
+}
+
+export async function fetchJudgeVideoUrl(
+  segmentId: string,
+  windowIdx: number,
+  camera: string = 'FRONT',
+): Promise<JudgeVideoUrl> {
+  const params = new URLSearchParams({
+    segment_id: segmentId,
+    window_idx: String(windowIdx),
+    camera,
+  })
+  const response = await fetch(`${JUDGE_API_URL}/judge/video-url?${params}`, { cache: 'no-store' })
+  return parseResponse<JudgeVideoUrl>(response)
+}
+
+export async function submitJudgeRating(
+  submission: JudgeRatingSubmission,
+): Promise<{ ok: boolean }> {
+  const response = await fetch(`${JUDGE_API_URL}/judge/ratings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(submission),
+  })
+  return parseResponse<{ ok: boolean }>(response)
+}
+
+export async function fetchJudgeSession(raterId: string): Promise<JudgeSessionSummary> {
+  const response = await fetch(
+    `${JUDGE_API_URL}/judge/session/${encodeURIComponent(raterId)}`,
+    { cache: 'no-store' },
+  )
+  return parseResponse<JudgeSessionSummary>(response)
 }

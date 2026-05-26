@@ -40,22 +40,16 @@ const REGIONS = [
 
 const DATASET_EXAMPLES = [
   {
-    name: 'Waymo Open Dataset',
+    name: 'Waymo Open Dataset v2',
     uri: 'gs://waymo_open_dataset_v_2_0_1/validation/camera_image',
     auth: 'gcloud auth application-default login',
-    note: 'Requires Waymo dataset access approval at waymo.com/open',
+    note: 'Requires Waymo dataset access approval at waymo.com/open. Uses the camera_image Parquet schema.',
   },
   {
-    name: 'nuScenes (GCS mirror)',
-    uri: 'gs://your-bucket/nuscenes/v1.0-trainval/samples',
+    name: 'Custom Waymo-format GCS Dataset',
+    uri: 'gs://your-bucket/path/to/camera_image',
     auth: 'gcloud auth application-default login',
-    note: 'Point at your org\'s GCS mirror of the nuScenes sample directory',
-  },
-  {
-    name: 'Custom GCS Dataset',
-    uri: 'gs://your-bucket/path/to/parquet-files',
-    auth: 'gcloud auth application-default login',
-    note: 'Any GCS path containing Parquet scene files',
+    note: 'Any GCS path containing Waymo v2 camera_image Parquet files (key.camera_name, key.frame_timestamp_micros, [CameraImageComponent].image columns).',
   },
 ]
 

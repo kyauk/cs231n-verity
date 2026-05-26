@@ -1,3 +1,1 @@
-"""Pipeline package for nuPlan retrieval and embedding stages."""
-
-"""Edge Case Discovery Engine -- pipeline package."""
+# Verity Phase 1 pipeline — home for all discovery modules.

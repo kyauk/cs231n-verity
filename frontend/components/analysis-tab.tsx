@@ -29,10 +29,13 @@ interface AnalysisTabProps {
   scene: Scene | null
 }
 
-// Maps a pipeline progress `step` to the index of the agent it belongs to.
+// Maps a pipeline progress `step` (from waymo_pipeline/io.py ProgressStep)
+// to the agent panel index.  Using exact step names keeps the mapping
+// unambiguous — no prefix matching that breaks on renames.
 function stepToAgentIndex(step: string): number {
-  if (step.startsWith('debate_judge')) return 2
-  if (step.startsWith('debate')) return 0 // proponent/critic rounds light up step 1+
+  if (step === 'debate_judge') return 2
+  if (step === 'debate_round_proponent') return 0
+  if (step === 'debate_round_critic') return 1
   return -1
 }
 
@@ -75,21 +78,13 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
 
     try {
       const result = await runAnalysisStream(scene.id, (progress) => {
-        // Progress events keep the stepper alive while the pipeline runs.
+        // Route each progress event to the correct agent panel by step name.
         const agentIdx = stepToAgentIndex(progress.step)
+        if (agentIdx < 0) return
         setSteps(prev =>
           prev.map((s, idx) => {
-            if (progress.step === 'debate_judge' && idx === 2) {
-              return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
-            }
-            if (agentIdx === 0 && progress.step.startsWith('debate_round')) {
-              // Proponent + critic share rounds; light steps 0 and 1.
-              const target = progress.detail.toLowerCase().includes('critic') ? 1 : 0
-              if (idx === target) {
-                return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
-              }
-            }
-            return s
+            if (idx !== agentIdx) return s
+            return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
           }),
         )
       })

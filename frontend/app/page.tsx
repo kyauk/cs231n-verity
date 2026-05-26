@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Database, ScatterChart, Brain, LayoutDashboard } from 'lucide-react'
+import { Database, ScatterChart, Brain, LayoutDashboard, Gavel } from 'lucide-react'
 import { IngestTab } from '@/components/ingest-tab'
 import { ClusterSpaceTab } from '@/components/cluster-space-tab'
 import { AnalysisTab } from '@/components/analysis-tab'
 import { DashboardTab } from '@/components/dashboard-tab'
+import { JudgeTab } from '@/components/judge-tab'
 import {
   fetchBatchJobs,
   launchBatch,
@@ -151,6 +152,13 @@ export default function Home() {
               <LayoutDashboard className="w-4 h-4 mr-2" />
               Dashboard
             </TabsTrigger>
+            <TabsTrigger
+              value="judge"
+              className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+            >
+              <Gavel className="w-4 h-4 mr-2" />
+              Judge
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -182,6 +190,10 @@ export default function Home() {
               scenarios={scenarios}
               onViewScenario={handleViewScenario}
             />
+          </TabsContent>
+
+          <TabsContent value="judge" className="h-full m-0 data-[state=inactive]:hidden">
+            <JudgeTab />
           </TabsContent>
         </div>
       </Tabs>
