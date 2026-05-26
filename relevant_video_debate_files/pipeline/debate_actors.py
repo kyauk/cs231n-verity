@@ -52,9 +52,11 @@ SCENE_ANALYST_SYSTEM_PROMPT = (
     "struck a construction sign sitting in the travel lane and was deflected "
     "into the ego lane'), and pinpoint why this situation is a valuable AV "
     "regression edge case. "
-    "You may use vlm_followup sparingly (0-2 calls) to clarify critical causal "
-    "ambiguities; answers are drawn from the prior scene description unless "
-    "live GPU VLM is enabled. Prefer finishing over repeated tool calls. "
+    "You may use vlm_followup up to 5 times to clarify critical causal "
+    "ambiguities (timing, off-frame events, occlusions, agent behavior); "
+    "answers are drawn from the prior scene description unless live GPU VLM "
+    "is enabled. Prefer finishing once you have enough evidence — do not pad "
+    "to 5 calls if earlier answers already resolve the scene. "
     "When finished, produce a JSON with keys: "
     "`failure_mode` (string: the real-world event / causal chain, e.g. "
     "'lead vehicle struck a misplaced construction sign on the highway and "
@@ -183,10 +185,13 @@ def _build_scene_analyst_message(context: DebateContext) -> str:
         "Regression-value rationale (from prior VLM pass; why this clip may "
         f"matter for AV testing):\n{context.anomaly_rationale}\n\n"
         "Your task: reconstruct what actually happened in the world and why "
-        "an AV would find this hard. You may use vlm_followup at most twice "
+        "an AV would find this hard. You may use vlm_followup up to 5 times "
         "for critical ambiguities, then finish with the required JSON. Do NOT "
         "question whether the footage is real, and do NOT attribute events "
-        "to glitches or unrealistic physics."
+        "to glitches or unrealistic physics.\n\n"
+        "When you finish, Action Input must be a JSON object with keys: "
+        "failure_mode, why_valuable_for_regression, evidence_summary "
+        "(not an empty {})."
     )
 
 
@@ -299,9 +304,20 @@ _ARBITER_DECISION_MAP: dict[str, tuple[str, str]] = {
     "dismiss": ("no", "already_covered"),
 }
 
+_ARBITER_OUTPUT_KEYS = ("decision", "recommended_test_spec")
 _SCENE_OUTPUT_KEYS = ("failure_mode", "why_valuable_for_regression", "evidence_summary")
 _RISK_OUTPUT_KEYS = ("risk_level", "affected_capability")
 _COVERAGE_OUTPUT_KEYS = ("counterarguments", "rebuttal_summary")
+
+
+def _apply_merged_final_output(
+    contribution: ActorContribution,
+    merged: dict[str, Any],
+) -> None:
+    """Reflect merged/fallback output in the transcript Final line."""
+
+    if merged:
+        contribution.final_output = dict(merged)
 
 
 def _actor_llm_failed(contribution: ActorContribution) -> bool:
@@ -523,7 +539,14 @@ def run_tool_augmented_debate(
         context=context,
         max_steps=max_steps,
         llm_call=llm_call,
+        required_output_keys=_SCENE_OUTPUT_KEYS,
     )
+    scene_output = _merge_actor_output(
+        scene_contribution,
+        _SCENE_OUTPUT_KEYS,
+        _fallback_scene_output(record),
+    )
+    _apply_merged_final_output(scene_contribution, scene_output)
 
     _emit_pipeline_progress(
         "debate_round",
@@ -534,13 +557,18 @@ def run_tool_augmented_debate(
         actor_name="Risk Assessor",
         system_prompt=RISK_ASSESSOR_SYSTEM_PROMPT,
         available_tools=["safety_taxonomy_lookup"],
-        user_message=_build_risk_assessor_message(
-            context, scene_contribution.final_output
-        ),
+        user_message=_build_risk_assessor_message(context, scene_output),
         context=context,
         max_steps=max_steps,
         llm_call=llm_call,
+        required_output_keys=_RISK_OUTPUT_KEYS,
     )
+    risk_output = _merge_actor_output(
+        risk_contribution,
+        _RISK_OUTPUT_KEYS,
+        _fallback_risk_output(context, scene_output),
+    )
+    _apply_merged_final_output(risk_contribution, risk_output)
 
     _emit_pipeline_progress(
         "debate_round",
@@ -551,13 +579,18 @@ def run_tool_augmented_debate(
         actor_name="Coverage Analyst",
         system_prompt=COVERAGE_ANALYST_SYSTEM_PROMPT,
         available_tools=["suite_similarity"],
-        user_message=_build_coverage_analyst_message(
-            context, scene_contribution.final_output
-        ),
+        user_message=_build_coverage_analyst_message(context, scene_output),
         context=context,
         max_steps=max_steps,
         llm_call=llm_call,
+        required_output_keys=_COVERAGE_OUTPUT_KEYS,
     )
+    coverage_output = _merge_actor_output(
+        coverage_contribution,
+        _COVERAGE_OUTPUT_KEYS,
+        _fallback_coverage_output(),
+    )
+    _apply_merged_final_output(coverage_contribution, coverage_output)
 
     _emit_pipeline_progress(
         "debate_judge",
@@ -570,29 +603,14 @@ def run_tool_augmented_debate(
         available_tools=[],
         user_message=_build_arbiter_message(
             context,
-            scene_contribution.final_output,
-            risk_contribution.final_output,
-            coverage_contribution.final_output,
+            scene_output,
+            risk_output,
+            coverage_output,
         ),
         context=context,
         max_steps=max_steps,
         llm_call=llm_call,
-    )
-
-    scene_output = _merge_actor_output(
-        scene_contribution,
-        _SCENE_OUTPUT_KEYS,
-        _fallback_scene_output(record),
-    )
-    risk_output = _merge_actor_output(
-        risk_contribution,
-        _RISK_OUTPUT_KEYS,
-        _fallback_risk_output(context, scene_output),
-    )
-    coverage_output = _merge_actor_output(
-        coverage_contribution,
-        _COVERAGE_OUTPUT_KEYS,
-        _fallback_coverage_output(),
+        required_output_keys=_ARBITER_OUTPUT_KEYS,
     )
     arbiter_output = arbiter_contribution.final_output or {}
 

@@ -7,12 +7,51 @@ import gc
 import re
 import json
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
+
+# CRITICAL: ``python -m pipeline.stage_describe_and_debate`` registers this
+# file only as ``__main__`` in ``sys.modules``. Any later
+# ``from pipeline.stage_describe_and_debate import X`` (e.g. from
+# ``pipeline.actor_tools._vlm_followup_via_gpu``) would otherwise trigger a
+# SECOND import, creating a fresh module object with a fresh
+# ``_hf_chat_completion`` function that has no ``_cache`` attribute. The
+# Scene Analyst follow-ups would then reload the 30B VLM on every call and
+# OOM against the description's still-resident model.
+#
+# Aliasing here forces both names to share the same module object so the
+# function attribute cache survives across stages.
+if __name__ == "__main__":
+    sys.modules.setdefault(
+        "pipeline.stage_describe_and_debate", sys.modules["__main__"]
+    )
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # python-dotenv is in requirements.txt but be defensive
+    load_dotenv = None  # type: ignore[assignment]
+
+if load_dotenv is not None:
+    # The frontend (Next.js) and CLI entry points spawn this module without
+    # loading the backend .env, so do it here so REACT_* / COSMOS_HF_* /
+    # NVIDIA_* settings (e.g. REACT_ENABLE_VLM_FOLLOWUP) are honored regardless
+    # of how the stage was launched. ``override=False`` keeps any var already
+    # set in the parent shell as the source of truth.
+    _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    load_dotenv(_PROJECT_ROOT / ".env", override=False)
+
+# Tell PyTorch's CUDA allocator to use expandable segments. This dramatically
+# reduces "tried to allocate <N MiB>" fragmentation OOMs that show up when a
+# large MoE VLM (e.g. Qwen3-VL-30B-A3B) is kept resident across multiple
+# generate() calls (description + several Scene Analyst follow-ups). Must be
+# set before torch is imported anywhere to take effect.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from pipeline.models.handoff_contracts import (
     AnomalyResultRecord,
@@ -285,14 +324,45 @@ def _hf_chat_completion(
 
     cache = getattr(_hf_chat_completion, "_cache", None)
     if cache is None or cache.get("model_id") != model_id:
+        cached_model_id = (
+            cache.get("model_id") if isinstance(cache, dict) else None
+        )
+        print(
+            f"[pipeline] HF VLM cache MISS "
+            f"(cache_present={cache is not None}, cached_model_id={cached_model_id!r}, "
+            f"requested_model_id={model_id!r}, quantization={quantization!r}). "
+            "Will load from_pretrained.",
+            flush=True,
+        )
         _emit_pipeline_progress(
             "model_load",
             "Loading vision-language model",
             "Downloading or loading weights (first run is slower); please wait.",
         )
 
+        # ``device_map`` strategy:
+        #   * For quantized loads, ``"auto"`` lets accelerate sprinkle
+        #     unquantizable layers (embeddings, layer norms, MoE routers,
+        #     vision-tower projections) onto CPU/disk when it thinks the GPU
+        #     is full, which then breaks generate() with:
+        #         "Some modules are dispatched on the CPU or the disk."
+        #     On a single big GPU this is almost always wrong - the model fits
+        #     trivially when forced onto one device. We pin to the active GPU
+        #     unless the caller has explicitly overridden via env.
+        #   * For un-quantized loads, ``"auto"`` is fine (and sometimes
+        #     necessary on multi-GPU hosts).
+        device_map_override = os.getenv("COSMOS_HF_DEVICE_MAP", "").strip()
+        if device_map_override:
+            device_map: Any = device_map_override
+        elif quantization in {"int8", "8bit", "int4", "4bit", "nf4"} and torch.cuda.is_available():
+            # Single-device pin: ``{"": 0}`` tells accelerate "every module on
+            # cuda:0". This avoids any CPU/disk offload heuristic.
+            device_map = {"": 0}
+        else:
+            device_map = "auto"
+
         load_kwargs: dict[str, Any] = {
-            "device_map": "auto",
+            "device_map": device_map,
             "attn_implementation": "sdpa",
             "trust_remote_code": True,
         }
@@ -357,10 +427,67 @@ def _hf_chat_completion(
             **load_kwargs,
         )
         processor = transformers.AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        cache = {"model_id": model_id, "model": model, "processor": processor}
-        setattr(_hf_chat_completion, "_cache", cache)
 
         quant_suffix = f" ({quantization})" if quantization else ""
+
+        # Audit final device placement BEFORE we cache. If any layer ended up
+        # on ``cpu`` or ``disk`` we should fail fast with an actionable
+        # message instead of letting generate() blow up later with the cryptic
+        # "Some modules are dispatched on the CPU or the disk." error, and we
+        # should NOT cache the broken model so we don't get stuck on it.
+        offload_devices: set[str] = set()
+        device_map_attr: dict[str, Any] = {}
+        try:
+            device_map_attr = getattr(model, "hf_device_map", None) or {}
+            for placement in device_map_attr.values():
+                placement_str = str(placement).lower()
+                if placement_str in {"cpu", "disk", "meta"}:
+                    offload_devices.add(placement_str)
+        except Exception:  # noqa: BLE001
+            pass
+
+        if offload_devices:
+            sample_offloaded = [
+                name for name, placement in device_map_attr.items()
+                if str(placement).lower() in offload_devices
+            ][:6]
+            raise RuntimeError(
+                f"Loaded {model_id}{quant_suffix} but accelerate placed some "
+                f"modules on {sorted(offload_devices)} (e.g. {sample_offloaded}). "
+                "generate() would fail. Fixes: (1) set COSMOS_HF_DEVICE_MAP "
+                "explicitly to {\"\": 0}, (2) free other GPU processes, or "
+                "(3) switch to a smaller checkpoint such as "
+                "Qwen/Qwen3-VL-8B-Instruct or nvidia/Cosmos-Reason2-8B."
+            )
+
+        # Audit passed - now cache for reuse by subsequent description retries
+        # AND by Scene Analyst vlm_followup calls when the model is kept warm.
+        cache = {"model_id": model_id, "model": model, "processor": processor}
+        setattr(_hf_chat_completion, "_cache", cache)
+        print(
+            f"[pipeline] HF VLM cache POPULATED with model_id={model_id!r}"
+            f"{quant_suffix}. "
+            f"_cache attribute now at id={id(cache):#x}.",
+            flush=True,
+        )
+
+        # Report post-load VRAM so it's obvious whether quantization engaged
+        # and how much room is left for the description's KV cache and any
+        # subsequent vlm_followup calls.
+        try:
+            if torch.cuda.is_available():
+                free_bytes, total_bytes = torch.cuda.mem_get_info()
+                used_gib = (total_bytes - free_bytes) / (1024**3)
+                free_gib = free_bytes / (1024**3)
+                total_gib = total_bytes / (1024**3)
+                print(
+                    f"[pipeline] Loaded {model_id}{quant_suffix}. "
+                    f"GPU used={used_gib:.2f} GiB, free={free_gib:.2f} GiB, "
+                    f"total={total_gib:.2f} GiB.",
+                    flush=True,
+                )
+        except Exception:  # noqa: BLE001
+            pass
         _emit_pipeline_progress(
             "model_ready",
             "Model ready",
@@ -444,7 +571,19 @@ def release_hf_model_cache() -> None:
 
     cache = getattr(_hf_chat_completion, "_cache", None)
     if not cache:
+        print(
+            "[pipeline] release_hf_model_cache() called but cache was already empty.",
+            flush=True,
+        )
         return
+
+    import traceback as _traceback
+
+    print(
+        "[pipeline] release_hf_model_cache() invoked - dropping HF VLM. "
+        f"Called from:\n{''.join(_traceback.format_stack(limit=6))}",
+        flush=True,
+    )
 
     model = cache.get("model")
     processor = cache.get("processor")
@@ -466,7 +605,7 @@ def release_hf_model_cache() -> None:
     except Exception:  # noqa: BLE001
         gc.collect()
 
-    print("[pipeline] Released HF VLM from GPU before debate stage.", flush=True)
+    print("[pipeline] Released HF VLM from GPU.", flush=True)
 
 
 def _nim_text_chat_completion(messages: list[dict[str, Any]]) -> str:
@@ -1129,7 +1268,53 @@ def main() -> int:
         f"Processed {len(description_outputs)} window(s). Starting debate stage…",
     )
 
-    release_hf_model_cache()
+    # Only evict the VLM if no follow-up calls will need it. The debate text
+    # rounds use the remote NVIDIA NIM API and consume no local GPU, so when
+    # REACT_ENABLE_VLM_FOLLOWUP=1 we want the VLM to stay warm in VRAM so each
+    # follow-up is a fast forward pass instead of a 30B reload from disk.
+    keep_vlm_warm_for_followups = os.getenv(
+        "REACT_ENABLE_VLM_FOLLOWUP", "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if keep_vlm_warm_for_followups:
+        # Release transient allocations left over from the description
+        # stage's 3200-token generate() so the first follow-up has maximum
+        # headroom. We do NOT drop the model weights.
+        cache_before_debate = getattr(_hf_chat_completion, "_cache", None)
+        cache_present = isinstance(cache_before_debate, dict) and "model" in cache_before_debate
+        try:
+            import torch  # type: ignore[import-not-found]
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                free_bytes, total_bytes = torch.cuda.mem_get_info()
+                free_gib = free_bytes / (1024**3)
+                total_gib = total_bytes / (1024**3)
+                print(
+                    "[pipeline] Keeping HF VLM resident in GPU for Scene Analyst "
+                    f"vlm_followup calls (REACT_ENABLE_VLM_FOLLOWUP=1). "
+                    f"cache_populated={cache_present}, "
+                    f"GPU free={free_gib:.2f} GiB / {total_gib:.2f} GiB after "
+                    "post-description cleanup.",
+                    flush=True,
+                )
+            else:
+                print(
+                    "[pipeline] Keeping HF VLM resident in GPU for Scene Analyst "
+                    f"vlm_followup calls (REACT_ENABLE_VLM_FOLLOWUP=1). "
+                    f"cache_populated={cache_present}.",
+                    flush=True,
+                )
+        except Exception:  # noqa: BLE001
+            print(
+                "[pipeline] Keeping HF VLM resident in GPU for Scene Analyst "
+                f"vlm_followup calls (REACT_ENABLE_VLM_FOLLOWUP=1). "
+                f"cache_populated={cache_present}.",
+                flush=True,
+            )
+    else:
+        release_hf_model_cache()
 
     debate_inputs = [build_debate_input(record, regression_suite) for record in description_outputs]
     debate_outputs: list[DebateOutputRecord] = []

@@ -286,8 +286,19 @@ def _vlm_followup_enabled() -> bool:
     }
 
 
-def _vlm_followup_via_text(question: str, context: DebateContext) -> str:
-    """Answer a visual follow-up using the prior description (no GPU VLM reload)."""
+def _vlm_followup_via_text(
+    question: str,
+    context: DebateContext,
+    reason: str = "disabled",
+) -> str:
+    """Answer a visual follow-up using the prior description (no GPU VLM reload).
+
+    ``reason`` is interpolated into the observation tag so the transcript shows
+    *why* the text-only path was used (``disabled`` when
+    ``REACT_ENABLE_VLM_FOLLOWUP`` is off, ``gpu-failed`` when a GPU attempt
+    raised). This lets a reviewer distinguish "feature off" from
+    "GPU path crashed and fell back".
+    """
 
     from pipeline.stage_describe_and_debate import _nim_text_chat_completion
 
@@ -315,13 +326,43 @@ def _vlm_followup_via_text(question: str, context: DebateContext) -> str:
         answer = _nim_text_chat_completion(messages).strip()
     except Exception as error:  # noqa: BLE001
         return f"vlm_followup error: {error}"
-    return f"[text-only] {answer}"
+    return f"[text-only:{reason}] {answer}"
 
 
 def _vlm_followup_via_gpu(question: str, context: DebateContext) -> str:
-    """Run a live VLM follow-up (reloads HF model; only when explicitly enabled)."""
+    """Run a live VLM follow-up against the already-loaded HF VLM.
+
+    Memory hygiene:
+      * Follow-ups sample the video at ``REACT_VLM_FOLLOWUP_FPS`` (default 2)
+        instead of the description's ``COSMOS_HF_VIDEO_FPS`` (default 8).
+        Vision-token count and activation memory scale linearly with frames,
+        so this is the single biggest knob for avoiding fragmentation OOMs on
+        large MoE checkpoints.
+      * Generation length is capped by ``REACT_VLM_FOLLOWUP_MAX_NEW_TOKENS``
+        (default 512) so the per-call KV-cache slab stays small relative to
+        the description stage's 3200-token slab.
+      * ``empty_cache`` + ``gc.collect`` are run immediately before each call
+        to release transient blocks left over from prior generate() runs.
+    """
+
+    import gc
 
     from pipeline.stage_describe_and_debate import _hf_chat_completion
+
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:  # noqa: BLE001
+        pass
+
+    followup_fps = float(
+        os.getenv("REACT_VLM_FOLLOWUP_FPS")
+        or os.getenv("COSMOS_HF_VIDEO_FPS", "8")
+    )
 
     media_blocks: list[dict[str, Any]] = []
     for media_ref in context.media_refs:
@@ -329,7 +370,7 @@ def _vlm_followup_via_gpu(question: str, context: DebateContext) -> str:
         lowered = media_ref.lower()
         if lowered.endswith((".mp4", ".mov", ".mkv", ".avi", ".webm")):
             media_blocks.append(
-                {"type": "video", "video": abs_path, "fps": context.video_fps}
+                {"type": "video", "video": abs_path, "fps": followup_fps}
             )
         elif lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
             media_blocks.append({"type": "image", "image": abs_path})
@@ -374,7 +415,7 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
         )
 
     if not _vlm_followup_enabled():
-        return _vlm_followup_via_text(question, context)
+        return _vlm_followup_via_text(question, context, reason="disabled")
 
     try:
         import torch  # type: ignore[import-not-found]
@@ -387,14 +428,26 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
     try:
         return _vlm_followup_via_gpu(question, context)
     except Exception as error:  # noqa: BLE001
-        error_text = str(error).lower()
-        if "out of memory" in error_text or "cuda" in error_text:
-            text_answer = _vlm_followup_via_text(question, context)
-            return (
-                f"{text_answer} "
-                "(GPU VLM unavailable after OOM; answered from prior description.)"
-            )
-        return f"vlm_followup error: {error}"
+        # Any GPU-side failure (OOM, missing weights, processor mismatch,
+        # video decode error, transformers import failure, ...) falls back to
+        # text-only so the actor still gets a usable Observation. Surface the
+        # underlying error in the tag so the transcript shows what broke.
+        error_text = str(error)
+        lowered = error_text.lower()
+        if "out of memory" in lowered or "cuda" in lowered:
+            short_reason = "gpu-oom"
+        else:
+            short_reason = "gpu-failed"
+        print(
+            f"[pipeline] vlm_followup GPU path failed ({short_reason}): "
+            f"{error_text}",
+            flush=True,
+        )
+        text_answer = _vlm_followup_via_text(
+            question, context, reason=short_reason
+        )
+        truncated = error_text if len(error_text) <= 200 else error_text[:197] + "..."
+        return f"{text_answer} (GPU VLM error: {truncated})"
 
 
 def safety_taxonomy_lookup(
