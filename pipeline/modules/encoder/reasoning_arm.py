@@ -63,7 +63,7 @@ class VLMUnavailableError(ReasoningArmError):
         self.detail = detail
         super().__init__(
             f"\n{'='*70}\n"
-            f"LIBRARIAN ERROR: VLMUnavailableError\n"
+            f"ENCODER ERROR: VLMUnavailableError\n"
             f"  Model  : {model}\n"
             f"  Detail : {detail}\n"
             f"  → Check NVIDIA_API_KEY and network access.\n"
