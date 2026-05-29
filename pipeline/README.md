@@ -1,5 +1,7 @@
 # Verity Pipeline — Architecture Reference
 
+> **Getting started?** See the [root README](../README.md) for installation, configuration, and quick-start instructions.
+
 Six-module lego-block pipeline for AV safety scenario discovery.
 Each module is a standalone Python package that imports shared types from
 `pipeline/interfaces/` and nothing from other modules' internals.

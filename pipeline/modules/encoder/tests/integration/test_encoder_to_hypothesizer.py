@@ -134,7 +134,7 @@ def test_window_id_survives_boundary_crossing(tmp_path: Path) -> None:
     """window_id identity is preserved through serialisation + boundary crossing."""
     enc = _make_encoder(tmp_path)
     window = _make_window("boundary_seg", 42)
-    record = enc.process(window)
+    record = enc.process(window)[0]
 
     # Simulate what happens at a service boundary: to_json → from_json
     wire = record.to_json()

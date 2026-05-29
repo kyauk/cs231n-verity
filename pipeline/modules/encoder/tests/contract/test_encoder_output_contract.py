@@ -41,7 +41,7 @@ def test_process_returns_schema_record_type() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        result = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        result = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
     assert isinstance(result, SchemaRecord)
 
 
@@ -50,7 +50,7 @@ def test_schema_record_all_fields_present_on_success() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
 
     # window_id
     assert isinstance(r.window_id, WindowKey)
@@ -88,7 +88,7 @@ def test_schema_record_fields_types_on_success() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
 
     assert isinstance(r.fields["agents"], list)
     assert isinstance(r.fields["environment"], dict)
@@ -114,7 +114,7 @@ def test_schema_record_failure_mode_on_failure() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         enc = Encoder(vlm=AlwaysBadVLM(), vocabulary=DEFAULT_VOCABULARY, cache_root=tmp, max_retries=1)
-        r = enc.process(WindowInput(segment_id="seg_fail", window_idx=0, storage=_make_storage()))
+        r = enc.process(WindowInput(segment_id="seg_fail", window_idx=0, storage=_make_storage()))[0]
 
     assert r.failure_mode is not None
     assert isinstance(r.failure_mode, str)
@@ -129,7 +129,7 @@ def test_schema_record_to_json_has_all_fields() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
 
     d = r.to_json()
     required = ["window_id", "arm", "schema_version", "prompt_template_id",
@@ -151,7 +151,7 @@ def test_schema_record_round_trip_via_interfaces() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        original = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        original = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
 
     restored = SchemaRecord.from_json(original.to_json())
     assert str(restored.window_id) == str(original.window_id)
@@ -170,7 +170,7 @@ def test_successful_record_passes_vocabulary_validation() -> None:
     from pipeline.modules.encoder.schema import WindowInput
     with tempfile.TemporaryDirectory() as tmp:
         enc = _make_encoder(Path(tmp))
-        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))
+        r = enc.process(WindowInput(segment_id="seg_001", window_idx=0, storage=_make_storage()))[0]
 
     violations = DEFAULT_VOCABULARY.validate_fields(r.fields)
     assert violations == [], f"Vocabulary violations in output: {violations}"

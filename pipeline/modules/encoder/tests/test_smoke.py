@@ -310,7 +310,7 @@ def test_encoder_process_success(tmp_path: Path) -> None:
         cache_root=tmp_path,
     )
     window = _make_window()
-    record = lib.process(window)
+    record = lib.process(window)[0]
 
     assert record.succeeded
     assert record.failure_mode is None
@@ -338,7 +338,7 @@ def test_encoder_process_caches_result(tmp_path: Path) -> None:
     lib.process(window)
     assert call_count == 1
 
-    record2 = lib.process(window)
+    record2 = lib.process(window)[0]
     assert call_count == 1          # VLM not called again
     assert record2.cached is True
 
@@ -360,7 +360,7 @@ def test_encoder_records_storage_error(tmp_path: Path) -> None:
     from pipeline.modules.encoder.encoder import Encoder
     from pipeline.modules.encoder.reasoning_arm import StubVLMClient
     from pipeline.modules.encoder.vocabulary import DEFAULT_VOCABULARY
-    from pipeline.modules.storage.adapters.base import WindowStorageError
+    from pipeline.interfaces.errors import WindowStorageError
 
     bad_storage = MagicMock()
     bad_storage.get_window_video_url.side_effect = WindowStorageError(
@@ -369,7 +369,7 @@ def test_encoder_records_storage_error(tmp_path: Path) -> None:
 
     lib = Encoder(vlm=StubVLMClient(), vocabulary=DEFAULT_VOCABULARY, cache_root=tmp_path)
     window = _make_window(storage=bad_storage)
-    record = lib.process(window)
+    record = lib.process(window)[0]
 
     assert not record.succeeded
     assert record.failure_mode == "storage_error"
@@ -386,7 +386,7 @@ def test_encoder_records_vlm_unavailable(tmp_path: Path, capsys: pytest.CaptureF
             raise VLMUnavailableError("stub/dead", "connection refused")
 
     lib = Encoder(vlm=DeadClient(), vocabulary=DEFAULT_VOCABULARY, cache_root=tmp_path)
-    record = lib.process(_make_window())
+    record = lib.process(_make_window())[0]
 
     assert record.failure_mode == "vlm_unavailable"
     captured = capsys.readouterr()
@@ -410,7 +410,7 @@ def test_schema_record_round_trip() -> None:
             vocabulary=DEFAULT_VOCABULARY,
             cache_root=Path(tmp),
         )
-        original = lib.process(_make_window())
+        original = lib.process(_make_window())[0]
         d = original.to_json()
         restored = SchemaRecord.from_json(d)
 

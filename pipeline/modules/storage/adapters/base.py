@@ -15,6 +15,10 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from pipeline.interfaces.errors import (  # noqa: F401 — re-exported for callers
+    StorageError,
+    WindowStorageError,
+)
 from pipeline.interfaces.window import (  # noqa: F401 — re-exported for callers
     DatasetManifest,
     PoseData,
@@ -26,11 +30,12 @@ from pipeline.interfaces.window import (  # noqa: F401 — re-exported for calle
 
 # ---------------------------------------------------------------------------
 # Errors — loud by design, never silent
+#
+# StorageError (base) and WindowStorageError live in pipeline.interfaces.errors
+# because they cross module boundaries; they are re-exported above so internal
+# imports within this module keep working. The errors below are Storage-internal
+# and never leave Module 1.
 # ---------------------------------------------------------------------------
-
-class StorageError(Exception):
-    """Base class for all Module 1: Storage errors."""
-
 
 class SourceUnreachableError(StorageError):
     """Raised immediately when the source bucket / mount cannot be reached.
@@ -82,17 +87,6 @@ class SourceAdapterError(StorageError):
             f"  → Check adapter logs. Segment will be skipped."
         )
         _loud(self)
-
-
-class WindowStorageError(StorageError):
-    """Raised when WindowStorage cannot fulfill a retrieval request."""
-    def __init__(self, key: str, detail: str) -> None:
-        self.key = key
-        self.detail = detail
-        super().__init__(
-            f"[Storage] WindowStorage retrieval failed for {key!r}.\n"
-            f"  Detail: {detail}"
-        )
 
 
 class IngestionError(StorageError):

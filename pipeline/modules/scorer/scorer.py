@@ -26,8 +26,8 @@ import hashlib
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
 
 from pipeline.interfaces.proposal import CompositionProposal, ScoredProposal
 from pipeline.modules.scorer.config import (
@@ -72,6 +72,7 @@ class Scorer:
         difficulty_client: TextClient | None = None,
         config: ScorerConfig = ScorerConfig(),
         cache_root: Path | None = None,
+        max_workers: int = 4,
     ) -> None:
         self._config = config
         self._cache_root = Path(cache_root) if cache_root else None
@@ -96,6 +97,7 @@ class Scorer:
             if difficulty_client is not None
             else _NO_DIFFICULTY_SENTINEL
         )
+        self._max_workers = max_workers
 
     # ------------------------------------------------------------------
     # Public interface
@@ -121,8 +123,22 @@ class Scorer:
         return result
 
     def score_batch(self, proposals: list[CompositionProposal]) -> list[ScoredProposal]:
-        """Score a list of proposals. Failures are caught per-proposal."""
-        return [self.score(p) for p in proposals]
+        """Score a list of proposals concurrently. Failures are caught per-proposal.
+
+        Results preserve input order. score() never raises, so a future result
+        is always a ScoredProposal.
+        """
+        results: list[ScoredProposal | None] = [None] * len(proposals)
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+            futures = {
+                pool.submit(self.score, p): i
+                for i, p in enumerate(proposals)
+            }
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+
+        return [r for r in results if r is not None]
 
     # ------------------------------------------------------------------
     # Internal scoring logic

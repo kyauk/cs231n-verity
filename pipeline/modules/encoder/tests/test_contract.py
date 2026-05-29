@@ -72,7 +72,7 @@ def _make_window(segment_id: str = "contract_seg", window_idx: int = 0, storage:
 
 def test_output_is_interfaces_schema_record(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert isinstance(record, SchemaRecord), (
         f"Output must be pipeline.interfaces.schema_record.SchemaRecord, "
         f"got {type(record).__module__}.{type(record).__name__}"
@@ -85,7 +85,7 @@ def test_output_is_interfaces_schema_record(tmp_path: Path) -> None:
 
 def test_window_id_field(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window(segment_id="seg_abc", window_idx=7))
+    record = enc.process(_make_window(segment_id="seg_abc", window_idx=7))[0]
     assert isinstance(record.window_id, WindowKey), (
         f"window_id must be WindowKey, got {type(record.window_id)}"
     )
@@ -100,7 +100,7 @@ def test_window_id_field(tmp_path: Path) -> None:
 
 def test_arm_field(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert record.arm in ("reasoning", "visual"), f"arm must be reasoning|visual, got {record.arm!r}"
     assert record.arm == "reasoning"
 
@@ -112,7 +112,7 @@ def test_arm_field(tmp_path: Path) -> None:
 def test_schema_version_field(tmp_path: Path) -> None:
     from pipeline.modules.encoder.schema import CURRENT_SCHEMA_VERSION
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert isinstance(record.schema_version, str)
     assert record.schema_version == CURRENT_SCHEMA_VERSION, (
         f"schema_version mismatch: got {record.schema_version!r}, "
@@ -126,7 +126,7 @@ def test_schema_version_field(tmp_path: Path) -> None:
 
 def test_prompt_template_id_field(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert record.prompt_template_id is None or isinstance(record.prompt_template_id, str)
 
 
@@ -136,7 +136,7 @@ def test_prompt_template_id_field(tmp_path: Path) -> None:
 
 def test_failure_mode_none_on_success(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert record.failure_mode is None, (
         f"failure_mode must be None for a successful record, got {record.failure_mode!r}"
     )
@@ -151,7 +151,7 @@ REQUIRED_FIELDS = ["agents", "environment", "road", "traffic_control", "ego_task
 
 def test_fields_all_required_keys_present(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     assert record.failure_mode is None, "Test requires a successful record"
     for key in REQUIRED_FIELDS:
         assert key in record.fields, f"Required field {key!r} missing from record.fields"
@@ -163,7 +163,7 @@ def test_fields_all_required_keys_present(tmp_path: Path) -> None:
 
 def test_agents_field_type_and_vocabulary(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     agents = record.fields.get("agents")
     assert isinstance(agents, list), f"agents must be list, got {type(agents)}"
     for tag in agents:
@@ -179,7 +179,7 @@ def test_agents_field_type_and_vocabulary(tmp_path: Path) -> None:
 
 def test_environment_field_shape(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     env = record.fields.get("environment")
     assert isinstance(env, dict), f"environment must be dict, got {type(env)}"
     for subkey in ("weather", "time_of_day", "lighting_condition"):
@@ -199,7 +199,7 @@ def test_environment_field_shape(tmp_path: Path) -> None:
 def test_road_field_shape(tmp_path: Path) -> None:
     from pipeline.modules.encoder.vocabulary import LANE_COUNT_MAX, LANE_COUNT_MIN
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     road = record.fields.get("road")
     assert isinstance(road, dict), f"road must be dict, got {type(road)}"
     assert "geometry" in road
@@ -217,7 +217,7 @@ def test_road_field_shape(tmp_path: Path) -> None:
 
 def test_traffic_control_field(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     tc = record.fields.get("traffic_control")
     if tc is not None:
         assert tc in DEFAULT_VOCABULARY.traffic_control, (
@@ -231,7 +231,7 @@ def test_traffic_control_field(tmp_path: Path) -> None:
 
 def test_ego_task_field(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     et = record.fields.get("ego_task")
     if et is not None:
         assert et in DEFAULT_VOCABULARY.ego_task, (
@@ -245,7 +245,7 @@ def test_ego_task_field(tmp_path: Path) -> None:
 
 def test_conditions_field_type_and_vocabulary(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
     conds = record.fields.get("conditions")
     assert isinstance(conds, list), f"conditions must be list, got {type(conds)}"
     for tag in conds:
@@ -262,7 +262,7 @@ def test_conditions_field_type_and_vocabulary(tmp_path: Path) -> None:
 def test_side_effect_cache_written(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
     window = _make_window(segment_id="cache_seg", window_idx=3)
-    record = enc.process(window)
+    record = enc.process(window)[0]
     cache_dir = tmp_path / "encoder" / "reasoning"
     cache_files = list(cache_dir.glob("*.json"))
     assert len(cache_files) == 1, (
@@ -290,7 +290,7 @@ def test_failure_record_shape_on_vlm_failure(tmp_path: Path) -> None:
     enc = _make_encoder.__wrapped__ if hasattr(_make_encoder, "__wrapped__") else None
     from pipeline.modules.encoder.encoder import Encoder
     enc = Encoder(vlm=DeadVLM(), vocabulary=DEFAULT_VOCABULARY, cache_root=tmp_path)
-    record = enc.process(_make_window())
+    record = enc.process(_make_window())[0]
 
     assert isinstance(record, SchemaRecord)
     assert record.failure_mode == FAILURE_VLM_UNAVAILABLE
@@ -305,7 +305,7 @@ def test_failure_record_shape_on_vlm_failure(tmp_path: Path) -> None:
 
 def test_schema_record_round_trip_via_interfaces(tmp_path: Path) -> None:
     enc = _make_encoder(tmp_path)
-    original = enc.process(_make_window())
+    original = enc.process(_make_window())[0]
     serialised = original.to_json()
     restored = SchemaRecord.from_json(serialised)
 

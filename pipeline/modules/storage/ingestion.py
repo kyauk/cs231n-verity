@@ -50,7 +50,9 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,14 +62,12 @@ from pipeline.modules.storage.adapters.base import (
     IngestionError,
     IngestionRequest,
     PoseArray,
-    PoseRecord,
     RawSegment,
     SourceAdapterError,
     SourceUnreachableError,
     StorageError,
     WindowConfig,
     WindowManifest,
-    _loud,
 )
 
 _MAX_UPLOAD_RETRIES = 5
@@ -161,14 +161,16 @@ class _GCSBackend:
         self._creds = gcs_credentials
         self._project = project
         self._clients: dict[str, Any] = {}  # one client per bucket name
+        self._clients_lock = threading.Lock()
 
     def _client_for(self, bucket_name: str) -> Any:
-        if bucket_name not in self._clients:
-            self._clients[bucket_name] = self._storage.Client(
-                credentials=self._creds,
-                project=self._project,
-            )
-        return self._clients[bucket_name]
+        with self._clients_lock:
+            if bucket_name not in self._clients:
+                self._clients[bucket_name] = self._storage.Client(
+                    credentials=self._creds,
+                    project=self._project,
+                )
+            return self._clients[bucket_name]
 
     def blob_exists(self, bucket_name: str, blob_name: str) -> bool:
         client = self._client_for(bucket_name)
@@ -247,6 +249,19 @@ class _GCSBackend:
 # ---------------------------------------------------------------------------
 # MP4 encoding (ffmpeg)
 # ---------------------------------------------------------------------------
+
+def _encode_and_upload_camera(
+    cam_name: str,
+    frames: list[Frame],
+    fps: int,
+    bucket_name: str,
+    blob_path: str,
+    backend: "_GCSBackend",
+) -> None:
+    """Encode one camera's frames to MP4 and upload to GCS. Raises on failure."""
+    mp4_bytes = _encode_mp4(frames, fps)
+    backend.upload_bytes(bucket_name, blob_path, mp4_bytes, content_type="video/mp4")
+
 
 def _encode_mp4(frames: list[Frame], fps: int) -> bytes:
     """Encode a list of JPEG frames into an H.264 MP4 using ffmpeg.
@@ -554,19 +569,40 @@ class IngestionPipeline:
         start_ts = front[0].timestamp_us
         end_ts = front[-1].timestamp_us
 
-        # --- Encode MP4 per camera ---
-        for cam_name in config.cameras:
-            frames = window_frames.get(cam_name, [])
-            if not frames:
-                print(
-                    f"[Storage/Ingestion] WARNING: {segment_id}/{window_idx:04d} "
-                    f"camera {cam_name!r} has no frames — skipping camera.",
-                    file=sys.stderr,
+        # --- Encode + upload MP4 per camera (concurrent) ---
+        # Each camera is independent: submit all, then collect results.
+        # Manifest is written only after all cameras succeed.
+        # Orphaned blobs from succeeded cameras on partial failure are acceptable
+        # (manifest is never written, so list_windows() never surfaces this window).
+        camera_futures: dict[Future[None], str] = {}
+        with ThreadPoolExecutor(max_workers=len(config.cameras)) as cam_pool:
+            for cam_name in config.cameras:
+                frames = window_frames.get(cam_name, [])
+                if not frames:
+                    print(
+                        f"[Storage/Ingestion] WARNING: {segment_id}/{window_idx:04d} "
+                        f"camera {cam_name!r} has no frames — skipping camera.",
+                        file=sys.stderr,
+                    )
+                    continue
+                fut = cam_pool.submit(
+                    _encode_and_upload_camera,
+                    cam_name,
+                    frames,
+                    config.target_fps,
+                    bucket_name,
+                    f"{window_base}/camera_{cam_name}.mp4",
+                    backend,
                 )
-                continue
+                camera_futures[fut] = cam_name
 
+        failed = False
+        for fut, cam_name in camera_futures.items():
             try:
-                mp4_bytes = _encode_mp4(frames, config.target_fps)
+                fut.result()
+            except StorageError:
+                # upload_bytes already logged the detail
+                failed = True
             except Exception as exc:
                 print(
                     f"\n[Storage/Ingestion] ffmpeg FAILED for "
@@ -579,18 +615,10 @@ class IngestionPipeline:
                     detail=f"window={window_idx} camera={cam_name}: {exc}",
                     backend=backend,
                 )
-                return False
+                failed = True
 
-            try:
-                backend.upload_bytes(
-                    bucket_name,
-                    f"{window_base}/camera_{cam_name}.mp4",
-                    mp4_bytes,
-                    content_type="video/mp4",
-                )
-            except StorageError:
-                # upload_bytes already logged — just propagate the failure up
-                return False
+        if failed:
+            return False
 
         # --- Write pose.parquet ---
         pose_slice = raw.pose.slice_window(start_ts, end_ts)

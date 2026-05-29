@@ -82,7 +82,7 @@ def test_storage_manifest_flows_to_encoder() -> None:
                 window_idx=0,
                 storage=storage,
             )
-        )
+        )[0]
 
     # The record must be the interface type
     assert isinstance(record, SchemaRecord)
@@ -119,7 +119,7 @@ def test_storage_null_pose_summary_does_not_crash_encoder() -> None:
         enc = _make_encoder(Path(tmp))
         record = enc.process(
             WindowInput(segment_id="seg_integration_002", window_idx=1, storage=storage)
-        )
+        )[0]
 
     assert isinstance(record, SchemaRecord)
     assert record.succeeded  # null pose is handled, not a failure
@@ -149,7 +149,7 @@ def test_encoder_output_is_json_serializable_for_downstream() -> None:
         enc = _make_encoder(Path(tmp))
         record = enc.process(
             WindowInput(segment_id="seg_integration_003", window_idx=0, storage=storage)
-        )
+        )[0]
 
     # Downstream module (Hypothesizer) will receive this via JSON
     d = record.to_json()
