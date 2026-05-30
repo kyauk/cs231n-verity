@@ -502,6 +502,95 @@ class Evaluator:
 
 ---
 
+## Module 7: Dev Dashboard — Output Contract
+
+Private developer-facing evaluation surface — not part of the customer
+pipeline. Refuses to start unless `VERITY_DEV_MODE=1`. Frontend tabs only
+render when `NEXT_PUBLIC_DEV_DASHBOARD_URL` is set at build.
+
+Two evaluations, served by one FastAPI app on port 8002:
+
+### VLM Accuracy
+Upload a hand-labeled gold-set JSON + `schema_records.json` from an
+`analyze` run; the server returns per-field match counts and per-window
+diffs. No statistics in-UI — operator hand-aggregates from the visible
+totals or downloads the raw report.
+
+### Discrimination Test (CS231N-grade "do we beat random" eval)
+Per round: sample three pools of 30 windows each from the same dataset.
+
+| Pool | Definition |
+|---|---|
+| **Verity** | Top-30 accepted proposals by `final_rank_score`, each represented by its first motivating scene. |
+| **Random** | Uniform without replacement from all *succeeded* `SchemaRecord`s. |
+| **Naive-rare** | Uniform sample from the union of windows containing any of the **top-5 rarest atoms** by marginal frequency (computed via `Hypothesizer.compute_frequencies`). |
+
+All 90 windows blind-shuffled. Rater never sees source pool. Submitting a
+rating server-side persists it with the hidden pool label in `Rating.arm`.
+Export reveals labels for offline Mann-Whitney / scipy.stats analysis.
+
+### `DevRoundManifest` (interface type at `pipeline/interfaces/dev_round.py`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `round_id` | `str` | `round_<ISO-8601 UTC>_<8-char hash>` |
+| `created_at` | `str` | ISO-8601 UTC |
+| `dataset_label` | `str` | Operator-provided |
+| `pool_size` | `int` | 30 by default |
+| `seed` | `int` | Per-round RNG seed — rounds are reproducible |
+| `pools` | `dict[str, list[WindowKey]]` | Keys: `verity`, `random`, `naive_rare` |
+| `shuffled_order` | `list[WindowKey]` | Presentation order, blinded |
+| `naive_rare_atoms` | `list[str]` | The top-K atoms actually used |
+
+### Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `POST /dev/rounds` | Create round from uploaded scored + records |
+| `GET /dev/rounds` | List rounds (newest first) |
+| `GET /dev/rounds/{id}` | Status + progress |
+| `GET /dev/rounds/{id}/next` | Next blinded window for rater |
+| `GET /dev/rounds/{id}/video-url?segment_id=...&window_idx=...` | Pre-signed GCS URL |
+| `POST /dev/rounds/{id}/ratings` | Persist rating (source label server-set) |
+| `GET /dev/rounds/{id}/export` | Ratings + revealed source labels |
+| `GET /dev/accuracy/template` | Copy-paste gold-set template |
+| `POST /dev/accuracy/diff` | Upload gold + records, return diff JSON |
+
+### Run
+
+```bash
+# Backend
+VERITY_DEV_MODE=1 \
+DEV_DASHBOARD_BUCKET_URI=gs://your-bucket/verity \
+uvicorn pipeline.modules.dev_dashboard.server:app --port 8002 --reload
+
+# Frontend (in another terminal)
+cd frontend
+NEXT_PUBLIC_DEV_DASHBOARD_URL=http://localhost:8002 pnpm dev
+```
+
+### Blinding contract
+
+The `/next` endpoint **never** returns the source pool label. Server tests
+assert this explicitly. Source labels are revealed only by `/export`, after
+the round is complete (or partially complete — operator's call). A test
+mirrors the judge_ui blinding pattern.
+
+### Failure modes
+
+| Failure | Behavior |
+|---|---|
+| `VERITY_DEV_MODE` not set | Server refuses to start; raises at lifespan |
+| Pool size > available proposals (Verity) | 400 with which pool fell short |
+| Pool size > succeeded records (Random / Naive-rare) | 400 with details |
+| Window not in round | 400 on submit / video-url |
+| Score outside 1–5 | 422 (pydantic) |
+| `DEV_DASHBOARD_BUCKET_URI` unset | `/video-url` returns 503 |
+| Signed URL fails | 500 with the GCS signing-setup hint from README root |
+| Malformed gold set | 422 with which field validation failed |
+
+---
+
 ## Running tests
 
 ```bash

@@ -1,5 +1,61 @@
 # Verity — CHANGELOG
 
+## 2026-05-30 — Module 7: Dev Dashboard v1.0
+
+Private operator-facing evaluation surface for project self-evaluation
+(CS231N-grade rigor). Not part of the customer pipeline. Refuses to start
+unless `VERITY_DEV_MODE=1`. Frontend tabs only render when
+`NEXT_PUBLIC_DEV_DASHBOARD_URL` is set at build time.
+
+**Built:**
+- `pipeline/interfaces/dev_round.py` — new `DevRoundManifest` interface type with per-round `seed` for reproducibility.
+- `pipeline/interfaces/tests/test_dev_round_roundtrip.py` — 6 round-trip tests.
+- `pipeline/modules/dev_dashboard/`:
+  - `config.py` — env-var configuration + `DevModeNotEnabledError` hard gate.
+  - `sampling.py` — pure-function three-pool sampler (Verity / Random / Naive-rare). Reuses `pipeline.modules.hypothesizer.frequency.compute_frequencies` for the naive-rare baseline so "rarity" is the same measure used in production discovery.
+  - `accuracy.py` — pure-function gold-vs-VLM diff. Per-field exact match for scalars, precision/recall/F1 for multi-value (`agents`, `conditions`). No statistics in-UI; operator hand-aggregates from raw counters.
+  - `server.py` — FastAPI app on port 8002 with 9 endpoints. Lifespan refuses to start without `VERITY_DEV_MODE=1`. Atomic writes for manifests + ratings. Blinding contract enforced: `/next` never returns the source pool; `/export` reveals it.
+  - Tests: 12 sampling + 14 accuracy + 19 server + 5 contract + 1 round-lifecycle integration = 51 module tests.
+- `frontend/` — `dev-types.ts`, `dev-api.ts`, two tab components, conditional tabs in `page.tsx` behind `NEXT_PUBLIC_DEV_DASHBOARD_URL`.
+- `README.md` + `pipeline/README.md` + `.env.example` + `frontend/.env.local` — full Module 7 section, env vars, run instructions.
+
+**Tests:** 57 new this build. Pipeline total: **657 passing, 2 skipped, lint clean.**
+
+**Design decisions:**
+- **Access control: Option 0.** `VERITY_DEV_MODE=1` hard gate + bind to localhost. No login, no SQL, no auth. Single-user CS231N use case doesn't need ceremony; multi-user support is a future Option-1/2 path documented in conversation notes.
+- **Three-pool composition:** Verity = top-30 accepted proposals by `final_rank_score`, each represented by its first motivating scene. Random = uniform without replacement from all *succeeded* `SchemaRecord`s. Naive-rare = uniform from the union of windows containing any of the top-5 rarest atoms by marginal frequency. Top-5 (not single rarest) gives a broader, more defensibly "frequency-only" baseline.
+- **Filename convention for the gold-set upload:** copy-paste JSON template served at `/dev/accuracy/template`. No in-UI labeling — operators use Google Sheets / their preferred labeling tool, export to JSON.
+- **`Rating.arm` field carries the source-pool label.** No schema change needed — `arm` was already `str` in the interface. The rater never sees it; the server sets it from the round manifest at submit time.
+- **Per-round `seed` in `DevRoundManifest`.** Manifest is persisted with the seed so rounds are exactly reproducible (same scored.json + schema_records + seed → bit-identical manifest, after the Step 4 tiebreaker fix).
+- **No cache.** Round manifests and ratings are *persisted records*, not cached computations. Determinism guaranteed by seed alone.
+
+**Hygiene protocol (all 7 steps passed):**
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1. Smoke | ✅ | Both public flows return correctly-shaped outputs on minimal input |
+| 2. Contract | ✅ | 6 round-trip + 5 contract + 1 blinding-contract tests pass |
+| 3. Cross-module integration | ✅ | Round-lifecycle test: create → rate every window → export → numpy-free Mann-Whitney-style consumer joins ratings back to source pools |
+| 4. Pessimistic review | ✅ | 3 new concerns + 1 caught during build. 2 fixes + 2 documented |
+| 5. Reconciliation | ✅ | README endpoints, `DevRoundManifest` fields, implementation all aligned |
+| 6. Cache | ✅ | No cache; determinism via per-round seed; atomic writes |
+| 7. Sign-off | ✅ | This entry |
+
+**Bugs caught during build:**
+- `/next` and `/export` disagreed on "complete" when pools overlap (a window could appear in Verity AND Random). `/next` checked unique-window coverage; `/export` used a count comparison against `shuffled_order` (with duplicates). Fixed with shared `_round_is_complete()` helper using set-coverage semantics.
+
+**Bug caught during Step 4:**
+- Verity pool sort was unstable on tied `final_rank_score` — Python's stable sort preserved scored.json's arbitrary input order, which broke the per-round seed's reproducibility guarantee. Fixed with `composition_id` as deterministic tiebreaker; regression test pins behavior.
+
+**Accepted risks (documented in server.py docstring):**
+- **CONCURRENT SAME-WINDOW RATINGS:** Two simultaneous POSTs for the same `(round_id, window)` resolve via atomic rename — the loser is silently dropped. Mirrors judge_ui's pattern. Acceptable for single-rater dev use; needs an event log on top if extended to multi-rater scenarios.
+- **NETWORK EXPOSURE:** `VERITY_DEV_MODE=1` is the only access gate; no auth. Operators must bind to `127.0.0.1` (uvicorn default). Running `--host 0.0.0.0` exposes the dashboard to the network without authentication.
+
+**Deviations from plan:**
+- None. Module built exactly as approved in Phase 2 of the build cycle, plus the Step 4 fix.
+
+---
+
 ## 2026-05-29 — Bug-fix batch: NIM timeouts, GCS thread safety, MP4 size validation
 
 Three bugs that had been documented as "accepted risks" in earlier hygiene
@@ -87,6 +143,7 @@ F401/F841 hints are all in code outside this fix-batch).
 | 5 | Judge UI | ✅ Complete | ✅ Passed | 2026-05-26 |
 | 6 | Evaluation | ✅ Complete | ✅ Passed | 2026-05-26 |
 | CLI | `pipeline.run` (consumer-facing CLI) | ✅ Complete | ✅ Passed | 2026-05-29 |
+| 7 | Dev Dashboard (private operator eval surface) | ✅ Complete | ✅ Passed | 2026-05-30 |
 
 ---
 

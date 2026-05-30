@@ -237,6 +237,31 @@ Constraints of flat mode: each MP4 becomes one Verity "window" (no auto-slicing)
 
 ---
 
+### Optional: Dev Dashboard (private operator-facing eval surface)
+
+For projects that need to evaluate the pipeline itself (e.g. CS231N-style
+"does my pipeline beat random sampling?" experiments), there's a private
+Dev Dashboard with two tabs: **VLM Accuracy** (gold-vs-VLM per-field diff)
+and **Discrimination Test** (blinded human ratings against Verity / Random
+/ Naive-rare sample pools).
+
+```bash
+# Backend
+VERITY_DEV_MODE=1 \
+DEV_DASHBOARD_BUCKET_URI=gs://your-bucket/verity \
+uvicorn pipeline.modules.dev_dashboard.server:app --port 8002
+
+# Frontend (Dev tabs appear automatically when this env is set)
+NEXT_PUBLIC_DEV_DASHBOARD_URL=http://localhost:8002 cd frontend && pnpm dev
+```
+
+The server **refuses to start** without `VERITY_DEV_MODE=1`, and the
+frontend tabs are conditionally rendered behind `NEXT_PUBLIC_DEV_DASHBOARD_URL` —
+so the dev surface never ships in customer-facing deploys. Full contract at
+[`pipeline/README.md`](pipeline/README.md) → Module 7.
+
+---
+
 ## What the Scenario Scores Mean
 
 | Score | What it measures | Range |

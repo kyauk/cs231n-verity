@@ -2,12 +2,28 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Database, ScatterChart, Brain, LayoutDashboard, Gavel } from 'lucide-react'
+import {
+  Brain,
+  ClipboardCheck,
+  Database,
+  FlaskConical,
+  Gavel,
+  LayoutDashboard,
+  ScatterChart,
+} from 'lucide-react'
 import { IngestTab } from '@/components/ingest-tab'
 import { ClusterSpaceTab } from '@/components/cluster-space-tab'
 import { AnalysisTab } from '@/components/analysis-tab'
 import { DashboardTab } from '@/components/dashboard-tab'
 import { JudgeTab } from '@/components/judge-tab'
+import { DevAccuracyTab } from '@/components/dev-accuracy-tab'
+import { DevDiscriminationTab } from '@/components/dev-discrimination-tab'
+
+// Dev-dashboard tabs are conditionally rendered. They only appear when the
+// build was given NEXT_PUBLIC_DEV_DASHBOARD_URL — keeps them off customer
+// deployments. The backend additionally refuses to start without
+// VERITY_DEV_MODE=1 on the server side.
+const DEV_DASHBOARD_ENABLED = !!process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL
 import {
   fetchBatchJobs,
   launchBatch,
@@ -159,6 +175,24 @@ export default function Home() {
               <Gavel className="w-4 h-4 mr-2" />
               Judge
             </TabsTrigger>
+            {DEV_DASHBOARD_ENABLED && (
+              <>
+                <TabsTrigger
+                  value="dev-accuracy"
+                  className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+                >
+                  <ClipboardCheck className="w-4 h-4 mr-2" />
+                  Dev · Accuracy
+                </TabsTrigger>
+                <TabsTrigger
+                  value="dev-discrimination"
+                  className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+                >
+                  <FlaskConical className="w-4 h-4 mr-2" />
+                  Dev · Discrimination
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
         </div>
 
@@ -195,6 +229,23 @@ export default function Home() {
           <TabsContent value="judge" className="h-full m-0 data-[state=inactive]:hidden">
             <JudgeTab />
           </TabsContent>
+
+          {DEV_DASHBOARD_ENABLED && (
+            <>
+              <TabsContent
+                value="dev-accuracy"
+                className="h-full m-0 data-[state=inactive]:hidden"
+              >
+                <DevAccuracyTab />
+              </TabsContent>
+              <TabsContent
+                value="dev-discrimination"
+                className="h-full m-0 data-[state=inactive]:hidden"
+              >
+                <DevDiscriminationTab />
+              </TabsContent>
+            </>
+          )}
         </div>
       </Tabs>
     </div>
