@@ -417,3 +417,38 @@ def test_schema_record_round_trip() -> None:
     assert str(restored.window_id) == str(original.window_id)
     assert restored.failure_mode == original.failure_mode
     assert restored.fields == original.fields
+
+
+# ---------------------------------------------------------------------------
+# CosmosReason2Client timeout — must reach the OpenAI client so a stuck NIM
+# call cannot hang a worker thread in Encoder.process_batch
+# ---------------------------------------------------------------------------
+
+def test_cosmos_client_timeout_defaults_to_600_seconds() -> None:
+    from pipeline.modules.encoder.reasoning_arm import CosmosReason2Client
+    client = CosmosReason2Client(api_key="dummy")
+    assert client._timeout == 600.0
+
+
+def test_cosmos_client_timeout_constructor_arg_overrides_default() -> None:
+    from pipeline.modules.encoder.reasoning_arm import CosmosReason2Client
+    client = CosmosReason2Client(api_key="dummy", timeout=45.0)
+    assert client._timeout == 45.0
+
+
+def test_cosmos_client_timeout_env_var_overrides_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pipeline.modules.encoder.reasoning_arm import CosmosReason2Client
+    monkeypatch.setenv("NVIDIA_NIM_TIMEOUT_SECONDS", "300")
+    client = CosmosReason2Client(api_key="dummy")
+    assert client._timeout == 300.0
+
+
+def test_cosmos_client_timeout_passed_to_openai_constructor() -> None:
+    from pipeline.modules.encoder.reasoning_arm import CosmosReason2Client
+    client = CosmosReason2Client(api_key="dummy", timeout=42.0)
+    with patch("openai.OpenAI") as fake_openai:
+        client._get_client()
+    fake_openai.assert_called_once()
+    assert fake_openai.call_args.kwargs.get("timeout") == 42.0

@@ -24,9 +24,9 @@ from typing import Protocol, runtime_checkable
 class TextClient(Protocol):
     """Text-only VLM client. Both plausibility and difficulty arms use this.
 
-    Implementations: NIMTextClient (production), StubPlausibilityClient and
-    StubDifficultyClient (tests/offline). Compatible with any
-    OpenAI-chat-completion endpoint that accepts a text prompt.
+    Implementations: NIMTextClient (production, in nim_client.py),
+    StubPlausibilityClient and StubDifficultyClient (tests/offline).
+    Compatible with any OpenAI-chat-completion endpoint that accepts a text prompt.
     """
     model_id: str
 

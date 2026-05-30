@@ -100,19 +100,29 @@ Swap back to the cloud at any time by reverting that line.
 
 ### Step 1 — Load your fleet data
 
-Point Verity at your data directory and your GCS bucket. It will segment the data into 8-second windows and store them for analysis:
+Point Verity at your data and your GCS bucket. It segments the data into 8-second windows and uploads them in the canonical layout that the rest of the pipeline reads:
 
 ```bash
+# Waymo TFRecord (local files):
 python -m pipeline.run ingest \
-  --source /path/to/waymo/data \
-  --bucket gs://your-bucket/verity
+  --source-format waymo_tfrecord \
+  --source-root /data/waymo \
+  --bucket gs://your-bucket/verity \
+  --segments all
+
+# Waymo Parquet (GCS-resident source):
+python -m pipeline.run ingest \
+  --source-format waymo_parquet \
+  --source-root gs://waymo-bucket/validation/camera_image \
+  --bucket gs://your-bucket/verity \
+  --segments all
 ```
 
-This is a one-time step per dataset. Existing windows are skipped on re-runs.
+`--segments` accepts `all`, a comma-separated list, or `@path/to/file.txt` (one ID per line). Existing windows are skipped on re-runs unless you pass `--force`.
 
 ### Step 2 — Analyze
 
-Run the full analysis — Cosmos-Reason2 reads each window and extracts structured scene attributes, then Verity identifies which combinations of conditions are statistically underrepresented and scores them:
+Run the analysis — Cosmos-Reason2 annotates each window, Verity finds underrepresented compositions, and Scorer ranks them:
 
 ```bash
 python -m pipeline.run analyze \
@@ -120,7 +130,9 @@ python -m pipeline.run analyze \
   --output outputs/session-1
 ```
 
-Typical runtime: ~30 seconds per window (hosted NIM), ~5 seconds on a local A100.
+Typical runtime: ~30 seconds per window (hosted NIM), ~5 seconds on a local A100. Useful flags: `--stub` (offline / CI), `--no-visual` (skip the embedding arm), `--max-workers N` (concurrency), `--sign-as <sa-email>` (see signing options below).
+
+Outputs: `schema_records.json`, `proposals.json`, `scored.json` in the `--output` directory.
 
 ### Step 3 — Review findings in the browser
 
@@ -149,14 +161,79 @@ Multiple reviewers can rate independently — ratings are merged automatically i
 
 ```bash
 python -m pipeline.run report \
+  --scored outputs/session-1/scored.json \
+  --ratings outputs/ratings/ \
+  --seeds outputs/seeds.json \
   --output outputs/session-1
 ```
 
-This writes `outputs/session-1/report.json`, `report.md`, and `report.html` with:
+Or read ratings directly from a running Judge UI server instead of the filesystem:
+
+```bash
+python -m pipeline.run report \
+  --scored outputs/session-1/scored.json \
+  --ratings-url http://localhost:8001 \
+  --seeds outputs/seeds.json \
+  --output outputs/session-1
+```
+
+The **seeds file** is a JSON document you pre-register before any analysis run — it lists the windows you want recall measured against and labels each as `familiar` or `unfamiliar`:
+
+```json
+{
+  "seeded_windows": [
+    {"window": "seg_001/0000", "subset": "familiar"},
+    {"window": "seg_002/0001", "subset": "unfamiliar"}
+  ]
+}
+```
+
+The report writes `report.json`, `report.md`, and `report.html` (in a timestamped subdirectory) with:
 - Scenario recall at K=10, K=30, and full set
 - Per-scenario plausibility and frontier difficulty scores
 - Inter-rater agreement (Krippendorff's α)
 - Differential examples where reviewers disagreed most
+
+### GCS signed URLs — three working setups
+
+Step 2 (`analyze`) needs to give Cosmos-Reason2 a URL it can fetch each video from. v4 signed-URL generation **requires a private-key signer** — a user refresh-token ADC cannot sign. Pick one of:
+
+| Setup | When to use | How |
+|---|---|---|
+| **Service-account key file** | Local dev, single-operator runs | Export `GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json` instead of using `gcloud auth login`. |
+| **Service-account impersonation** | Production / shared infra, no keys on disk | Keep user ADC, grant your user `roles/iam.serviceAccountTokenCreator` on a reader SA, then pass `--sign-as reader@your-project.iam.gserviceaccount.com` to `analyze`. |
+| **Public-read bucket** | Quick PoCs, non-sensitive data only | `gsutil iam ch allUsers:objectViewer gs://your-bucket` — *do not use for production data.* |
+
+If you see `WindowStorageError: Signed URL generation failed`, you're missing one of these.
+
+### Quick-analysis path: I already have MP4s
+
+If you have a flat GCS bucket of MP4 segment videos (filenames as IDs) and want a fast read on what's underrepresented in them, skip `ingest` entirely:
+
+```bash
+# Single-camera bucket: files like gs://my-mp4s/drives/drive_001.mp4
+python -m pipeline.run analyze \
+  --bucket gs://my-mp4s/drives \
+  --storage-mode flat_mp4 \
+  --cameras FRONT \
+  --output outputs/quick
+
+# Multi-camera bucket: files like gs://my-mp4s/drives/drive_001_FRONT.mp4
+python -m pipeline.run analyze \
+  --bucket gs://my-mp4s/drives \
+  --storage-mode flat_mp4 \
+  --cameras FRONT,FRONT_LEFT,FRONT_RIGHT,SIDE_LEFT,SIDE_RIGHT \
+  --output outputs/full
+```
+
+**`--cameras` is required in flat mode** — you must declare which cameras your MP4s contain so the visual-arm embedding dimensionality is explicit. Filename convention is decided by your camera count:
+
+| `--cameras` count | Filename pattern | Example |
+|---|---|---|
+| 1 | `<segment_id>.mp4` | `drive_001.mp4` |
+| 2+ | `<segment_id>_<camera>.mp4` | `drive_001_FRONT.mp4` |
+
+Constraints of flat mode: each MP4 becomes one Verity "window" (no auto-slicing). For windowed analysis of large drives, use the canonical `ingest` → `analyze` path instead.
 
 ---
 
@@ -180,6 +257,18 @@ Check that `NVIDIA_API_KEY` is set and valid. If using local NIM, confirm contai
 
 **"WindowStorageError" when reading fleet data**
 Your GCS credentials may have expired. Re-run `gcloud auth application-default login` or check your service account key.
+
+**"WindowStorageError: Signed URL generation failed"**
+You're authenticated against GCS but the credentials cannot sign v4 URLs (e.g. a user refresh-token has no private key). See **GCS signed URLs** above — pick one of the three setups.
+
+**"NVIDIA_API_KEY is not set" from `analyze`**
+Either set the env var (or load `.env`) or pass `--stub` to run offline with the canned stub clients (useful for CI and smoke tests).
+
+**Lots of `vlm_unavailable` failures on a fresh NIM key (HTTP 429)**
+The default `--max-workers 8` is too aggressive for build.nvidia.com free-tier rate limits. Drop to `--max-workers 1` or `2` for your first runs. Each failed window is logged to stderr; the batch continues, no silent data loss.
+
+**`Ctrl-C` during `analyze` takes a while to actually exit**
+The `ThreadPoolExecutor` waits for in-flight VLM HTTP calls to finish before shutting down. The OpenAI client has no default timeout, so an interrupt may block until the slowest in-flight call returns or fails. Expected behavior; not a hang. To bail faster, kill the process directly.
 
 **Annotation is slow**
 Switch to Option B (local GPU). On a hosted A100, annotation runs ~6× faster than the NVIDIA cloud free tier.

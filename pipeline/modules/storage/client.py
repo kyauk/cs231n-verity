@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime
 import json
 import sys
+import threading
 from typing import Any
 
 from pipeline.modules.storage.adapters.base import (
@@ -72,34 +73,42 @@ class WindowStorage:
         self._sign_as = sign_as
         self._client: Any = None
         self._bucket_obj: Any = None
+        # Guards lazy GCS client init against concurrent first-callers. The
+        # hot path skips the lock once _bucket_obj is set; only first init
+        # contends. See test_window_storage_thread_safety.py.
+        self._bucket_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _get_bucket(self) -> Any:
+        # Double-checked locking: hot path is lock-free after first init.
         if self._bucket_obj is not None:
             return self._bucket_obj
-        try:
-            from google.cloud import storage  # noqa: PLC0415
-        except ImportError:
-            print(
-                "\n[Storage/Client] MISSING DEPENDENCY: google-cloud-storage\n"
-                "  Install it with:  pip install google-cloud-storage\n",
-                file=sys.stderr,
-            )
-            raise
-        try:
-            self._client = storage.Client(
-                credentials=self._creds, project=self._project
-            )
-            self._bucket_obj = self._client.bucket(self._bucket_name)
-        except Exception as exc:
-            raise WindowStorageError(
-                f"gs://{self._bucket_name}/{self._prefix}",
-                f"Could not connect to GCS: {type(exc).__name__}: {exc}",
-            ) from exc
-        return self._bucket_obj
+        with self._bucket_lock:
+            if self._bucket_obj is not None:  # another thread won the race
+                return self._bucket_obj
+            try:
+                from google.cloud import storage  # noqa: PLC0415
+            except ImportError:
+                print(
+                    "\n[Storage/Client] MISSING DEPENDENCY: google-cloud-storage\n"
+                    "  Install it with:  pip install google-cloud-storage\n",
+                    file=sys.stderr,
+                )
+                raise
+            try:
+                self._client = storage.Client(
+                    credentials=self._creds, project=self._project
+                )
+                self._bucket_obj = self._client.bucket(self._bucket_name)
+            except Exception as exc:
+                raise WindowStorageError(
+                    f"gs://{self._bucket_name}/{self._prefix}",
+                    f"Could not connect to GCS: {type(exc).__name__}: {exc}",
+                ) from exc
+            return self._bucket_obj
 
     def _blob_path(self, *parts: str) -> str:
         return "/".join([self._prefix] + list(parts))

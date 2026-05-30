@@ -4,10 +4,11 @@ Scores CompositionProposals (from the Hypothesizer) for plausibility and
 frontier difficulty, applies the acceptance filter, and emits ScoredProposals.
 
 Public surface (import from the package root):
-    from pipeline.modules.scorer import Scorer, ScorerConfig
+    from pipeline.modules.scorer import Scorer, ScorerConfig, NIMTextClient
 
-Both arms take an injected TextClient. Use the Stub* clients for offline runs
-and tests; the Failing* clients deliberately error, for failure-path tests.
+Both arms take an injected TextClient. NIMTextClient is the production
+implementation; the Stub* clients are for offline runs and tests; the Failing*
+clients deliberately error, for failure-path tests.
 """
 
 from pipeline.modules.scorer.config import (
@@ -20,6 +21,10 @@ from pipeline.modules.scorer.config import (
 from pipeline.modules.scorer.difficulty import (
     FailingDifficultyClient,
     StubDifficultyClient,
+)
+from pipeline.modules.scorer.nim_client import (
+    NIMTextClient,
+    NIMUnavailableError,
 )
 from pipeline.modules.scorer.plausibility import (
     FailingPlausibilityClient,
@@ -36,8 +41,9 @@ __all__ = [
     "Scorer",
     "ScorerConfig",
     "ScorerWeights",
-    # Client protocol + test doubles
+    # Client protocol + production + test doubles
     "TextClient",
+    "NIMTextClient",
     "StubPlausibilityClient",
     "FailingPlausibilityClient",
     "StubDifficultyClient",
@@ -45,6 +51,7 @@ __all__ = [
     # Errors + rejection-reason constants
     "ScorerError",
     "PlausibilityCheckFailedError",
+    "NIMUnavailableError",
     "REJECTION_PLAUSIBILITY_FAILED",
     "REJECTION_BELOW_THRESHOLD",
 ]

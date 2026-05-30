@@ -7,7 +7,7 @@ Every module that reads from WindowStorage uses these types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -192,3 +192,40 @@ class DatasetManifest:
             updated_at=str(d["updated_at"]),
             windows=[WindowKey.from_json(w) for w in d.get("windows", [])],
         )
+
+
+# ---------------------------------------------------------------------------
+# WindowStorageBase — Protocol every window-serving storage must satisfy
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class WindowStorageBase(Protocol):
+    """The duck-typed interface the Encoder and Judge UI rely on.
+
+    Two concrete implementations live in pipeline.modules.storage:
+      WindowStorage      — canonical ingested layout in GCS
+      FlatMP4Storage     — flat bucket of MP4s, one window per file
+
+    Adding a third implementation means writing a class with these three
+    methods. Nothing else in the pipeline changes.
+    """
+
+    def list_windows(self, segment_id: str | None = None) -> list[WindowKey]:
+        """Return all WindowKeys, optionally filtered by segment_id."""
+        ...
+
+    def get_window_video_url(
+        self,
+        segment_id: str,
+        window_idx: int,
+        camera: str = "FRONT",
+        ttl_seconds: int = 3600,
+    ) -> str:
+        """Return a fetchable URL for one camera's clip in this window."""
+        ...
+
+    def get_window_manifest(
+        self, segment_id: str, window_idx: int
+    ) -> WindowManifest:
+        """Return the WindowManifest for this window."""
+        ...

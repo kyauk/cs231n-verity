@@ -34,6 +34,7 @@ def _make_manifest_json(**overrides) -> dict:
 
 def _mock_storage(manifest_json: dict):
     """Return a WindowStorage with GCS calls mocked."""
+    import threading
     from pipeline.modules.storage.client import WindowStorage
     ws = WindowStorage.__new__(WindowStorage)
     ws._bucket_name = "test-bucket"
@@ -43,6 +44,7 @@ def _mock_storage(manifest_json: dict):
     ws._sign_as = None
     ws._client = None
     ws._bucket_obj = None
+    ws._bucket_lock = threading.Lock()
     ws._read_json_blob = MagicMock(return_value=manifest_json)
     ws._read_bytes_blob = MagicMock(return_value=b"")
     return ws

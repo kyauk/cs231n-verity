@@ -113,6 +113,7 @@ class CosmosReason2Client:
         model_id: str | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.0,
+        timeout: float | None = None,
     ) -> None:
         self.model_id = (
             model_id
@@ -124,6 +125,14 @@ class CosmosReason2Client:
         )
         self._max_tokens = max_tokens
         self._temperature = temperature
+        # 10-minute ceiling by default. A stuck NIM call must not hang a
+        # worker thread indefinitely (would block ThreadPoolExecutor's
+        # shutdown, including Ctrl-C in pipeline.run analyze).
+        self._timeout = float(
+            timeout
+            if timeout is not None
+            else os.environ.get("NVIDIA_NIM_TIMEOUT_SECONDS", "600")
+        )
 
         if not self._api_key:
             print(
@@ -143,7 +152,11 @@ class CosmosReason2Client:
                 file=sys.stderr,
             )
             raise
-        return OpenAI(api_key=self._api_key, base_url=self._base_url)
+        return OpenAI(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            timeout=self._timeout,
+        )
 
     def complete(self, video_url: str, prompt: str) -> str:
         """Send a video URL + text prompt to Cosmos-Reason2. Return raw text."""

@@ -1,16 +1,183 @@
 # Verity — CHANGELOG
 
+## 2026-05-29 — Bug-fix batch: NIM timeouts, GCS thread safety, MP4 size validation
+
+Three bugs that had been documented as "accepted risks" in earlier hygiene
+cycles, now fixed because each turned out to be a real reliability issue
+rather than the cosmetic concern I originally classified them as.
+
+**Fixed:**
+- **NIM client timeouts** (`CosmosReason2Client`, `NIMTextClient`) — both
+  now accept a `timeout` constructor arg (default 600 s = 10 min) and read
+  the shared `NVIDIA_NIM_TIMEOUT_SECONDS` env var. The timeout is passed to
+  the underlying `OpenAI(...)` client. Before this fix a stuck NIM call had
+  no upper bound and would block a `ThreadPoolExecutor` worker (and the
+  whole `pipeline.run analyze` process, including Ctrl-C) indefinitely.
+- **Thread-safe lazy GCS init** in `WindowStorage._get_bucket()` and
+  `FlatMP4Storage._get_bucket()` via double-checked locking on a
+  per-instance `threading.Lock`. Hot path is still lock-free after first
+  init. Concurrent first-callers no longer race to construct the GCS
+  client twice.
+- **MP4 size validation** in `FlatMP4Storage.get_window_video_url()`.
+  Switched from `blob.exists()` to `blob.reload()` (one HTTP HEAD-equivalent
+  that returns both existence AND `blob.size`) and added a `< 1024-byte`
+  floor (`_MIN_MP4_BYTES`). Truncated uploads, zero-byte placeholders, and
+  mis-renamed text files are now caught at retrieval time with a clear
+  error instead of producing an opaque VLM-fetch failure.
+
+**Tests added (16 new):**
+- `pipeline/modules/scorer/tests/test_nim_client.py` — 4 timeout tests
+  (default 600 s; constructor override; `NVIDIA_NIM_TIMEOUT_SECONDS` env
+  override; timeout reaches the OpenAI client).
+- `pipeline/modules/encoder/tests/test_smoke.py` — 4 parallel timeout
+  tests for `CosmosReason2Client`.
+- `pipeline/modules/storage/tests/test_thread_safety.py` — 4 tests
+  (16 concurrent first-callers → exactly 1 client construction; pre-warmed
+  cache → 0 constructions; same for both `WindowStorage` and
+  `FlatMP4Storage`).
+- `pipeline/modules/storage/tests/test_flat_mp4.py` — 4 size-validation
+  tests (zero bytes / 512 bytes / `size=None` rejected; healthy 100 KB
+  blob accepted).
+
+**Test helper updates:**
+- `_fake_blob` in `test_flat_mp4.py` now sets `blob.reload`, `blob.size`,
+  and `blob.content_type` so existing tests work under the new code path.
+- Contract and integration fixtures (`test_flat_mp4_output_contract.py`,
+  `test_flat_mp4_to_encoder.py`) updated likewise.
+- `_mock_storage` in `test_storage_output_contract.py` now sets
+  `_bucket_lock` since the test bypasses `__init__` via `__new__`.
+
+**Docs:**
+- `flat_mp4.py` module docstring — replaced the now-stale "no validation"
+  and "not thread-safe" accepted-risk entries with the new "Validation +
+  safety" section. The greedy filename-parser caveat remains (genuine,
+  unchanged).
+
+**Re-hygiene scope:** lightweight, per the protocol's "Bug fixes that
+don't change contracts" rule. Smoke + contract + reconciliation only;
+no full new hygiene cycle. All existing contract tests still pass
+(`WindowManifest` shape, `WindowStorageBase` Protocol satisfaction).
+
+**Why these were originally classified as "accepted risks":**
+- Timeouts: I conflated the symptom (slow Ctrl-C) with a UX limitation
+  rather than recognizing the root cause as a real reliability bug.
+- Thread safety: I rationalized it by noting `WindowStorage` had the same
+  bug — "matches the existing pattern" is not a justification.
+- MP4 validation: I claimed full validation was too expensive (true) and
+  missed that cheap metadata checks were essentially free.
+
+The user pushed back on all three. Fixed.
+
+**Pipeline total: 598 passing, 2 skipped, lint clean** (the 3 remaining
+F401/F841 hints are all in code outside this fix-batch).
+
+---
+
 ## Implementation Status
 
 | Module | Name | Status | Hygiene Protocol | Date |
 |---|---|---|---|---|
 | 0 | Interfaces package | ✅ Complete | ✅ Passed | 2026-05-26 |
 | 1 | Storage | ✅ Complete | ✅ Passed | 2026-05-26 |
+| 1+ | Storage — FlatMP4Storage sibling | ✅ Complete | ✅ Passed | 2026-05-29 |
 | 2 | Encoder (reasoning arm) | ✅ Complete | ✅ Passed | 2026-05-26 |
 | 3 | Hypothesizer | ✅ Complete | ✅ Passed | 2026-05-26 |
 | 4 | Scorer | ✅ Complete | ✅ Passed | 2026-05-26 |
+| 4+ | Scorer — NIMTextClient (production text client) | ✅ Complete | ✅ Passed | 2026-05-29 |
 | 5 | Judge UI | ✅ Complete | ✅ Passed | 2026-05-26 |
 | 6 | Evaluation | ✅ Complete | ✅ Passed | 2026-05-26 |
+| CLI | `pipeline.run` (consumer-facing CLI) | ✅ Complete | ✅ Passed | 2026-05-29 |
+
+---
+
+## 2026-05-29 — `pipeline.run` CLI orchestration layer v1.0
+
+**Built:**
+- `pipeline/run.py` (~390 LoC) — three subcommands wiring the six pipeline modules end-to-end. Uses ONLY package-root public surfaces (`from pipeline.modules.X import ...`); no submodule reaching, no internals access.
+  - `ingest`: builds `WaymoParquetSource`/`WaymoTFRecordSource` from `--source-format` + `--source-root`, parses `--segments` (`all` | comma list | `@file`), builds `WindowConfig`+`IngestionRequest`, runs `IngestionPipeline`. Catches `SourceUnreachableError`/`SourceSchemaVersionError` → exit 2.
+  - `analyze`: builds storage (`WindowStorage` or `FlatMP4Storage` per `--storage-mode`), Encoder (with reasoning + visual arms; `--stub` swaps in offline clients; `--cameras` threads through to VisualArm in flat_mp4 mode), Hypothesizer, Scorer. Writes `schema_records.json`, `proposals.json`, `scored.json` atomically via `tmp + replace`.
+  - `report`: loads scored proposals + ratings (filesystem `--ratings` or HTTP `--ratings-url`) + pre-registered seeds JSON, runs Evaluator, saves report to timestamped subdir.
+- `pipeline/modules/scorer/nim_client.py` (~120 LoC) — `NIMTextClient` (production TextClient for Scorer; parallels `CosmosReason2Client` in Encoder) + `NIMUnavailableError`. Made the existing scorer config docstring claim "NIMTextClient (production)" truthful instead of aspirational.
+- Test files (~70 tests new this build):
+  - `pipeline/tests/run/test_cli_parsing.py` (14 argparse tests)
+  - `pipeline/tests/run/test_run_ingest.py` (16 tests — helpers + handler smoke)
+  - `pipeline/tests/run/test_run_analyze.py` (8 tests + 1 pessimistic-fix regression test)
+  - `pipeline/tests/run/test_run_analyze_flat_mp4.py` (10 tests — the new storage-mode + cameras path)
+  - `pipeline/tests/run/test_run_report.py` (12 tests — seeds parsing, ratings loaders, end-to-end)
+  - `pipeline/tests/run/contract/test_pipeline_run_output_contract.py` (5 tests — every output JSON round-trips through its interface type; NIMTextClient satisfies TextClient Protocol)
+  - `pipeline/tests/integration/test_pipeline_run_analyze_to_report.py` (1 marquee cross-stage test — analyze writes scored.json, report consumes it)
+  - `pipeline/modules/scorer/tests/test_nim_client.py` (9 tests — model_id env vs arg, complete() shape, NIMUnavailableError)
+- README.md — replaced the previously-fictional `python -m pipeline.run` invocations with the real CLI. Added "GCS signed URLs — three working setups" (the customer mitigation for blocker C from the GPU-instance feedback). Added "Quick-analysis path: I already have MP4s" section. Added three pessimistic-review-driven troubleshooting entries.
+- `.env.example` — added `SCORER_NIM_MODEL_ID` and the GCS signing-options block (SA key file / impersonation / public bucket).
+
+**Tests:** 70 new this build. Pipeline total: **582 passing, 2 skipped, lint clean.**
+
+**Design decisions:**
+- `pipeline.run` is consumer-only — produces no new interface type. It traffics in `WindowKey`, `SchemaRecord`, `CompositionProposal`, `ScoredProposal`, `Rating`, `EvaluationReport` (all from `pipeline.interfaces`).
+- Subcommands are deliberately separate (`ingest`, `analyze`, `report`) rather than a single `run-all`. Human review (the Judge UI) happens between `analyze` and `report`; bundling them would imply unattended end-to-end runs that don't match the customer workflow.
+- `--stub` mode wires in `StubVLMClient` + `StubPlausibilityClient` + `StubDifficultyClient`. Stub clients use distinct `model_id` strings (`stub/cosmos-reason2`, `stub/plausibility`, etc.) so their cache entries cannot poison subsequent production runs.
+- `NIMTextClient` lives in the scorer module (not in `pipeline.run`) — production clients belong with their module, parallel to `CosmosReason2Client` in the encoder. This was a deliberate scope expansion the user approved during planning.
+- File writes via `_write_json_list` are atomic (`tmp + replace`). Writes ACROSS files (schema_records → proposals → scored) are NOT atomic by design — re-running `analyze` is the recovery path.
+
+**Hygiene protocol (all 7 steps passed):**
+1. **Smoke:** ✅ `python -m pipeline.run --help` and each subcommand `--help` exit 0 with usable output.
+2. **Contract:** ✅ 5 contract tests assert every output JSON file round-trips through its interface type; `NIMTextClient` satisfies `TextClient` Protocol.
+3. **Cross-module integration:** ✅ Marquee test: real Hypothesizer + real Scorer (with stubs) on synthetic SchemaRecords designed to surface an arity-3 novel composition (`weather:fog × time_of_day:night × agents:pedestrian`). `analyze` writes `scored.json`; `report` reads that file and produces a valid `EvaluationReport`.
+4. **Pessimistic review:** ✅ 3 concerns: 1 fixed with a regression test (uncaught `WindowStorageError` from `list_windows` now returns exit 2 with actionable diagnostic text), 2 documented in README troubleshooting (`--max-workers` overwhelming free-tier NIM quotas; `Ctrl-C` delayed by in-flight OpenAI calls with no client timeout).
+5. **Reconciliation:** ✅ README ↔ argparse ↔ interface types all aligned line-by-line. All flags shown in README examples are real; all output files match their interface types.
+6. **Cache:** ✅ pipeline.run has no cache of its own. `--cache-root` is threaded through to Encoder + Scorer (both already hygiene-approved). `--stub` vs production are key-isolated by model_id, preventing cross-mode poisoning.
+7. **Sign-off:** ✅ This entry.
+
+**Accepted risks:**
+- **`--max-workers 8` overwhelms free-tier NIM quotas** producing `vlm_unavailable` failures. Failures are loud (stderr), not silent, but require customer adjustment. Documented in README troubleshooting; first-time customers told to drop to 1–2.
+- **`Ctrl-C` blocks on in-flight OpenAI HTTP calls** (no client-side timeout by default). Documented; real fix would require timeout config + signal handlers, deferred until customers report it as a UX blocker.
+- **File writes ACROSS subcommands are not atomic.** If `analyze` dies between writing `schema_records.json` and `proposals.json`, the output directory has inconsistent partial state. Recovery: re-run `analyze`. Acceptable because the encoder cache prevents redoing the expensive VLM work.
+
+**Deviations from architecture spec:**
+- Pre-existing: the original root README invented `python -m pipeline.run ingest|analyze|report` commands that didn't exist (caught when the GPU instance flagged blocker A). This build makes the invented promise real.
+
+---
+
+## 2026-05-29 — Module 1 sibling: FlatMP4Storage v1.0
+
+**Built:**
+- `pipeline/interfaces/window.py` — added `WindowStorageBase` Protocol (3 methods: `list_windows`, `get_window_video_url`, `get_window_manifest`). The Encoder and Judge UI now have a typed contract instead of `storage: Any` duck typing.
+- `pipeline/interfaces/tests/test_window_storage_protocol.py` — 3 tests (Protocol satisfaction, method enumeration, negative case)
+- `pipeline/modules/storage/flat_mp4.py` — `FlatMP4Storage` class (~250 LoC with docstring): read-only, stateless storage for flat MP4 buckets. Filename convention auto-switches on `len(cameras)`: bare `<id>.mp4` for single-camera, suffixed `<id>_<camera>.mp4` for multi-camera.
+- `pipeline/modules/storage/__init__.py` — re-exported `FlatMP4Storage`; updated docstring to mention both implementations.
+- `pipeline/modules/storage/tests/test_flat_mp4.py` — 23 unit tests (constructor validation, filename parsing both modes, list_windows dedup, signed URL generation, manifest synthesis, pessimistic-review pin).
+- `pipeline/modules/storage/tests/contract/test_flat_mp4_output_contract.py` — 15 contract tests asserting every README-declared field of the synthesized `WindowManifest` is present, typed, and carries the documented value.
+- `pipeline/tests/integration/test_flat_mp4_to_encoder.py` — 3 cross-module integration tests proving the Encoder consumes FlatMP4Storage with no special-casing.
+- `pipeline/run.py` — added `--storage-mode {canonical,flat_mp4}` and `--cameras` flags to the `analyze` subcommand. `--cameras` is required iff `--storage-mode flat_mp4`. `_build_encoder` threads `cameras` through to `VisualArm` so the visual-arm embedding dimensionality reflects what the customer declared.
+- `pipeline/tests/run/test_run_analyze_flat_mp4.py` — 10 CLI integration tests (argparse, validation, builder threading).
+- `README.md` — new "Quick-analysis path: I already have MP4s" section under "Running a Discovery Session" with both single- and multi-camera invocation examples.
+- `pipeline/README.md` — extended Module 1 contract section with "Two retrieval implementations" table and added "Adding a new SourceAdapter" HOWTO (the Option 3 the user approved as the customer-onboarding answer for messy parquet schemas).
+
+**Tests:** 54 new (3 + 23 + 15 + 3 + 10). Pipeline total: 578 passing.
+
+**Design decisions:**
+- `WindowStorageBase` is a Protocol, not an ABC — matches the existing pattern (`SourceAdapter`, `TextClient`, `VLMClient`). The constructor is intentionally NOT part of the contract because the two implementations have different required args (`WindowStorage(bucket_uri)` vs `FlatMP4Storage(bucket_uri, cameras)`).
+- Filename convention auto-switches on `len(cameras)` rather than being its own flag — single-camera customers (most common case) don't have to rename their bare `<id>.mp4` files.
+- `--cameras` is REQUIRED in flat mode with no default. The visual-arm embedding dimensionality must be explicit so downstream consumers don't silently get unexpected vector sizes.
+- `window_idx > 0` raises `WindowStorageError` rather than silently aliasing — the contract is "one MP4 = one window," and a non-zero request is a misuse signal.
+- Synthesized manifests have `frame_count=0` and `pose_summary=None` because flat MP4s carry no per-frame metadata. The Encoder already tolerates `pose_summary=None` (verified by integration test).
+
+**Hygiene protocol (all 7 steps passed):**
+1. **Smoke:** ✅ All three public methods return non-empty, correctly-typed values on minimal mocked input.
+2. **Contract:** ✅ 15/15 tests assert every README-documented `WindowManifest` field; `WindowStorageBase` satisfaction proven at runtime.
+3. **Cross-module integration:** ✅ 3/3 tests; the Encoder produces valid `SchemaRecord` objects from FlatMP4Storage windows without special-casing; `SchemaRecord` round-trips through JSON.
+4. **Pessimistic review:** ✅ 3 concerns identified — 1 fixed with a pinning test (filename collision when segment ID contains a camera substring), 2 documented (no MP4 content validation; lazy GCS client init is not thread-safe).
+5. **Reconciliation:** ✅ README, `interfaces/window.py`, and `flat_mp4.py` all describe the same shape; verified line-by-line.
+6. **Cache:** ✅ No cache — read-only and stateless. Determinism verified for load-bearing fields (list_windows is sorted; synthesized manifest fields are all deterministic except `ingested_at`, which is not in the Encoder's cache key).
+7. **Sign-off:** ✅ This entry.
+
+**Accepted risks:**
+- **No MP4 content validation:** FlatMP4Storage only checks blob existence. Corrupted MP4s, mis-renamed archives, or empty files will produce signed URLs and fail at VLM call time. Validating at the storage layer would require downloading or HEAD-probing every blob.
+- **Filename parser is greedy by camera-suffix match:** customers must avoid segment IDs that contain configured camera names as substrings (e.g. `drive_REAR_001` with `cameras=["REAR"]` parses incorrectly). Documented in the module docstring and pinned by `test_parse_blob_name_segment_id_containing_camera_substring`.
+- **Lazy GCS client init is not thread-safe:** concurrent first calls may construct the client twice (functionally equivalent, no corruption). Inherited from `WindowStorage`'s pattern.
+
+**Deviations from architecture spec:**
+- None. FlatMP4Storage was added by user request as a Module 1 sibling (not a new numbered module) for the "I already have MP4s, just want quick analysis" customer path. The architecture stays intact; the canonical `ingest → analyze → report` path remains the recommended default.
 
 ---
 

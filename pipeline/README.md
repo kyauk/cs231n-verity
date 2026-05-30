@@ -140,6 +140,42 @@ All errors inherit from `StorageError` and print to stderr immediately on constr
 | `WindowStorageError` | Retrieval request cannot be fulfilled | Caller must handle |
 | `IngestionError` | Fatal ingestion setup failure | Abort |
 
+### Two retrieval implementations
+
+Both satisfy the `WindowStorageBase` Protocol in [`pipeline/interfaces/window.py`](interfaces/window.py). Downstream modules (Encoder, Judge UI) depend on the Protocol, not on a specific class — so swapping in a new storage backend requires no changes outside Module 1.
+
+| Class | Layout it reads | When to use |
+|---|---|---|
+| `WindowStorage` | Canonical ingested layout (`windows/{id}/{idx}/camera_*.mp4` + manifest, written by `IngestionPipeline`) | Standard path — sliced 8-second windows with synced pose. |
+| `FlatMP4Storage` | Flat bucket of MP4 files; filename is the segment ID; one window per MP4 | Quick analysis on existing MP4 data without ingestion. Constructor requires `cameras: list[str]` so the visual-arm embedding dimensionality is explicit. |
+
+`FlatMP4Storage` synthesizes a `WindowManifest` with `source_format="flat_mp4"`, `frame_count=0`, `cameras=<configured>`, `pose_summary=None`. `window_idx` is always 0; non-zero requests raise `WindowStorageError`.
+
+### Adding a new SourceAdapter (canonical-path extension)
+
+If your fleet data isn't in Waymo Parquet or TFRecord, write a `SourceAdapter` for your format. The Protocol lives in [`pipeline/modules/storage/adapters/base.py`](modules/storage/adapters/base.py); implementing it gets your format into `IngestionPipeline` without touching anything else.
+
+The contract you must satisfy:
+
+```python
+@runtime_checkable
+class SourceAdapter(Protocol):
+    format_name: str           # e.g. "lyft_v1.1", "kitti", "internal_avro_v3"
+    schema_version: str        # bump when your source schema changes breaking-ly
+
+    def list_segments(self) -> list[str]: ...
+    def validate_segment(self, segment_id: str) -> ValidationResult: ...
+    def fetch_segment(self, segment_id: str) -> RawSegment: ...
+```
+
+`RawSegment` is the load-bearing output — a per-camera dict of JPEG frames + timestamps + (optionally) `PoseArray`. Whatever your source format is, your adapter's job is decoding it down to this shape. `Frame`, `RawSegment`, `PoseArray`, and `ValidationResult` are all defined alongside the Protocol in `adapters/base.py`.
+
+A working reference implementation: [`adapters/parquet.py`](modules/storage/adapters/parquet.py) (`WaymoParquetSource`, ~280 LoC). The TFRecord variant is structurally similar.
+
+Once the class is written, register it in `pipeline.run` (`_build_source` in [`pipeline/run.py`](run.py)) so customers can select it via `--source-format <your_format>`.
+
+For one-off "I just have MP4s already" cases — don't write an adapter. Use `FlatMP4Storage` and skip `ingest` entirely (see the root README "Quick-analysis path").
+
 ---
 
 ## Module 2: Encoder — Output Contract
