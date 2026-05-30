@@ -2,77 +2,86 @@
 
 > **Getting started?** See the [root README](../README.md) for installation, configuration, and quick-start instructions.
 
-Six-module lego-block pipeline for AV safety scenario discovery.
-Each module is a standalone Python package that imports shared types from
-`pipeline/interfaces/` and nothing from other modules' internals.
+Lego-block pipeline for AV safety scenario discovery. Every module is a standalone Python package that imports shared types from `pipeline/interfaces/` and nothing from other modules' internals. The `pipeline.run` CLI is the composition root — it wires the modules together over their public interfaces.
 
 ---
 
 ## Pipeline overview
 
 ```
-Fleet footage (Waymo Parquet / TFRecord)
-         │
-         ▼
-┌──────────────────┐
-│  Module 1        │  WindowStorage client + IngestionPipeline
-│  Storage         │  Reads source footage → windows frames into 8-s clips
-│                  │  Uploads canonical bucket structure (GCS)
-│  Output:         │  WindowManifest, PoseData, WindowKey, signed video URLs
-└────────┬─────────┘
-         │  WindowStorage (read-only client)
-         ▼
-┌──────────────────┐
-│  Module 2        │  Encoder (reasoning arm only — Phase 1)
-│  Encoder         │  Calls Cosmos-Reason2 via NVIDIA NIM
-│                  │  Extracts structured JSON; validates against vocabulary
-│  Output:         │  SchemaRecord (one per window, success or failure_mode set)
-└────────┬─────────┘
-         │  list[SchemaRecord]
-         ▼
-┌──────────────────┐
-│  Module 3        │  Hypothesizer
-│  ✅ complete     │  Finds compositionally novel scenario combinations
-│  Output:         │  list[CompositionProposal]
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Module 4        │  Scorer
-│  ✅ complete     │  Rates plausibility + frontier difficulty; filters proposals
-│  Output:         │  list[ScoredProposal]
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Module 5        │  Judge UI
-│                  │  Human raters evaluate proposals; records coherence/usefulness
-│  Output:         │  list[Rating]
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Module 6        │  Evaluation
-│  ✅ complete     │  Seeded recall, rating stats, inter-rater agreement
-│  Output:         │  EvaluationReport
-└──────────────────┘
+                Fleet data input — two valid paths:
+                ──────────────────────────────────────
+                A. Waymo Parquet / TFRecord ──┐
+                B. Flat bucket of MP4 files ──┘
+                                              │
+                                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Module 1 — Storage                                           │
+│  ✅ Path A: IngestionPipeline → canonical layout              │
+│             WindowStorage retrieves windows from that layout  │
+│  ✅ Path B: FlatMP4Storage retrieves MP4s direct (no ingest)  │
+│  Both implement WindowStorageBase Protocol.                   │
+│  Output: WindowManifest, PoseData, signed video URLs          │
+└────────────────────────────┬──────────────────────────────────┘
+                             │  WindowStorage / FlatMP4Storage
+                             ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Module 2 — Encoder (reasoning + visual arms)                 │
+│  ✅ Reasoning arm: Cosmos-Reason2 → structured scene JSON     │
+│  ✅ Visual arm:    Cosmos-Embed1 → 1280-d embedding (opt-in)  │
+│  Output: SchemaRecord per (window, arm)                       │
+└────────────────────────────┬──────────────────────────────────┘
+                             │  list[SchemaRecord]
+                             ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Module 3 — Hypothesizer                                      │
+│  ✅ Finds compositionally novel scenario combinations         │
+│  Output: list[CompositionProposal]                            │
+└────────────────────────────┬──────────────────────────────────┘
+                             │
+                             ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Module 4 — Scorer (plausibility + frontier difficulty)       │
+│  ✅ NIMTextClient (production) or Stub/Failing clients        │
+│  Output: list[ScoredProposal]                                 │
+└─────────────┬──────────────────────────────────┬──────────────┘
+              │                                  │
+              ▼                                  ▼
+┌──────────────────────────────┐   ┌──────────────────────────────┐
+│  Module 5 — Judge UI         │   │  Module 7 — Dev Dashboard    │
+│  ✅ Customer-facing raters   │   │  ✅ Operator-facing eval     │
+│  Output: list[Rating]        │   │     - VLM accuracy diff      │
+└──────────────┬───────────────┘   │     - Discrimination test    │
+               │                   │  (gated by VERITY_DEV_MODE)  │
+               ▼                   └──────────────────────────────┘
+┌──────────────────────────────┐
+│  Module 6 — Evaluation       │
+│  ✅ Seeded recall, IRA, etc. │
+│  Output: EvaluationReport    │
+└──────────────────────────────┘
+
+                                ↑
+                  pipeline.run CLI (ingest / analyze / report)
+                  orchestrates everything above
 ```
 
 ---
 
 ## Shared interfaces (`pipeline/interfaces/`)
 
-All cross-module types are frozen dataclasses with `to_json()` / `from_json()`.
+All cross-module types are dataclasses with `to_json()` / `from_json()`.
 
 | File | Types |
 |---|---|
-| `window.py` | `WindowKey`, `PoseRecord`, `PoseData`, `WindowManifest`, `DatasetManifest` |
+| `window.py` | `WindowKey`, `PoseRecord`, `PoseData`, `WindowManifest`, `DatasetManifest`, `WindowStorageBase` (Protocol) |
+| `errors.py` | `StorageError`, `WindowStorageError` |
 | `schema_record.py` | `SchemaRecord` |
 | `proposal.py` | `CompositionProposal`, `ScoredProposal` |
 | `rating.py` | `Rating` |
 | `report.py` | `EvaluationReport`, `DifferentialExample` |
+| `dev_round.py` | `DevRoundManifest` (Module 7) |
 
-Round-trip tests: `pipeline/interfaces/tests/test_roundtrip.py` (24 tests).
+Round-trip tests live in `pipeline/interfaces/tests/`. Every cross-module type has at least one round-trip test pinning its serialization shape.
 
 ---
 
@@ -185,7 +194,7 @@ For one-off "I just have MP4s already" cases — don't write an adapter. Use `Fl
 | Field | Type | Notes |
 |---|---|---|
 | `window_id` | `WindowKey` | Identifies the annotated window |
-| `arm` | `str` | `"reasoning"` (Phase 1 only) |
+| `arm` | `str` | `"reasoning"` or `"visual"` (visual arm produced when Encoder is constructed with `visual_arm=`) |
 | `schema_version` | `str` | `"1.0"` |
 | `prompt_template_id` | `str \| None` | `"v1_describe"` |
 | `fields` | `dict` | All 6 vocabulary keys present on success; may be null-filled on failure |
@@ -251,7 +260,7 @@ All values drawn from the locked v1.0 vocabulary (`pipeline/modules/encoder/voca
 | `observed_joint` | `float` | Fraction of windows containing all constituents |
 | `novelty_score` | `float` | `ln(expected / max(observed, ε))` where `ε = 1/(10*N)` |
 | `motivating_scene_ids` | `list[WindowKey]` | Windows where all atoms co-occur |
-| `arm` | `str` | `"reasoning"` (Phase 1) |
+| `arm` | `str` | Propagated from the SchemaRecords this proposal was derived from (`"reasoning"` or `"visual"`) |
 
 `succeeded` property (inherited from proposal contract): `novelty_score > 0` indicates expected >> observed.
 
