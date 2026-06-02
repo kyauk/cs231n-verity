@@ -41,6 +41,8 @@ from waymo_pipeline.models.handoff_contracts import (
     SceneDescriptionInputRecord,
     SceneDescriptionOutputRecord,
 )
+from waymo_pipeline.debate_actors import run_tool_augmented_debate
+from waymo_pipeline.proposal_builder import build_proposal_from_debate_output
 
 PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 
@@ -190,7 +192,7 @@ def _nim_vlm_describe(video_path: str, anomaly_priors: dict[str, Any]) -> str:
     """
     api_key = os.getenv("NVIDIA_API_KEY", "")
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
-    model_id = os.getenv("DESCRIBE_NIM_MODEL_ID", "nvidia/vila")
+    model_id = os.getenv("DESCRIBE_NIM_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl")
     if not api_key:
         raise RuntimeError("NVIDIA_API_KEY missing for description stage.")
 
@@ -570,9 +572,14 @@ def main() -> int:
 
     debate_inputs = [build_debate_input(d, regression_suite) for d in description_outputs]
     debate_outputs: list[DebateOutputRecord] = []
-    for record in debate_inputs:
+    for record, description in zip(debate_inputs, description_outputs):
         try:
-            debate_outputs.append(multi_agent_debate(record, args.debate_rounds))
+            # Tool-augmented four-actor ReAct debate. VLM follow-ups re-query the
+            # clip through the hosted NIM vision API (no local model load).
+            debate_output, _proposal_metadata = run_tool_augmented_debate(
+                record, description.media_refs
+            )
+            debate_outputs.append(debate_output)
         except Exception as error:  # noqa: BLE001
             print(f"COSMOS_BLOCKED: true during debate stage: {error}")
             return 1
@@ -590,7 +597,7 @@ def main() -> int:
     _write_jsonl(debate_in_path, [r.model_dump() for r in debate_inputs])
     _write_jsonl(debate_out_path, [r.model_dump() for r in debate_outputs])
 
-    proposals = [build_proposal(d, run_id) for d in debate_outputs]
+    proposals = [build_proposal_from_debate_output(d, run_id) for d in debate_outputs]
     _write_jsonl(proposals_path, [r.model_dump() for r in proposals])
 
     summary = {
@@ -600,7 +607,8 @@ def main() -> int:
         "cosmos_blocked": False,
         "dataset": "waymo_open_dataset_v_2_0_1",
         "description_backend": backend,
-        "debate_backend": "nim_text",
+        "debate_backend": "nim_text_tool_augmented",
+        "vlm_followup_backend": "nim_vlm_api",
         "debate_model_id": os.getenv("DEBATE_NIM_MODEL_ID", "meta/llama-3.1-8b-instruct"),
         "description_outputs": desc_out_path,
         "debate_outputs": debate_out_path,

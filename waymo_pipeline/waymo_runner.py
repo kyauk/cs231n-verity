@@ -579,9 +579,18 @@ async def run_analysis_stream(payload: RunAnalysisRequest) -> StreamingResponse:
             return
 
         debate_history = (latest_debate.get("metadata", {}) or {}).get("debate_history", [])
-        proponent = "\n\n".join(h for h in debate_history if "Proponent" in h)
-        critic = "\n\n".join(h for h in debate_history if "Critic" in h)
+        # The tool-augmented debate uses four actors. Map them onto the
+        # frontend's three-slot view: Scene Analyst + Risk Assessor argue for
+        # inclusion (proposer), the Coverage Analyst is the skeptic (critic),
+        # and the Synthesis Arbiter's raw output is the judge verdict.
+        proponent = "\n\n".join(
+            h for h in debate_history
+            if "[Scene Analyst]" in h or "[Risk Assessor]" in h
+        )
+        critic = "\n\n".join(h for h in debate_history if "[Coverage Analyst]" in h)
         judge = (latest_debate.get("metadata", {}) or {}).get("judge_raw_output", "")
+        if not judge:
+            judge = "\n\n".join(h for h in debate_history if "[Synthesis Arbiter]" in h)
 
         priority_score = _risk_to_score(
             float(latest_debate.get("priority_score", 0.0)),
