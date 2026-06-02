@@ -55,18 +55,21 @@ def describe_composition(
     orderings = _three_orderings(constituents, seed)
     ordered = orderings[ordering_seed_offset % 3]
 
-    parts = []
-    for atom in ordered:
-        freq = marginal_frequencies.get(atom, 0.0)
-        parts.append(f"  - {atom} (appears in {freq:.1%} of windows)")
+    # NB: deliberately omit dataset frequencies (marginal / observed-joint) from
+    # the plausibility prompt. Plausibility must judge whether the conditions can
+    # *physically* co-occur, independent of how often they appear in this dataset.
+    # Rarity is captured separately by novelty_score; feeding "observed joint
+    # frequency: 0.0000" here made the model equate rare-in-data with impossible
+    # and reject every proposal (0/30 accepted).
+    parts = [f"  - {atom}" for atom in ordered]
 
     return (
-        f"Constituent conditions (arity {len(ordered)}):\n"
+        f"Scenario conditions (count {len(ordered)}):\n"
         + "\n".join(parts)
-        + f"\n\nStatistical context:\n"
-        f"  Expected joint frequency (under independence): {expected_joint:.4f}\n"
-        f"  Observed joint frequency: {observed_joint:.4f}\n"
-        f"  Novelty: these conditions are individually common but jointly rare."
+        + "\n\nJudge only whether these conditions can physically and "
+        "behaviorally co-occur in real-world driving. Do NOT consider how "
+        "rare or common the combination is — statistical rarity is not the "
+        "same as implausibility."
     )
 
 

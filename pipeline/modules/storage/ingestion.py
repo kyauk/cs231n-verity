@@ -320,7 +320,11 @@ def _encode_mp4(frames: list[Frame], fps: int) -> bytes:
             proc.stdin.write(img.tobytes())
 
         proc.stdin.close()
-        _, stderr_bytes = proc.communicate()
+        # NB: do not call proc.communicate() here — stdin is already closed and
+        # communicate() would re-flush it, raising "ValueError: flush of closed
+        # file" on Python 3.10+. Read stderr directly and wait for exit instead.
+        stderr_bytes = proc.stderr.read() if proc.stderr is not None else b""
+        proc.wait()
         if proc.returncode != 0:
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
             raise RuntimeError(

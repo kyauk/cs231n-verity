@@ -265,7 +265,6 @@ def _build_encoder(
 
     if stub:
         vlm: Any = StubVLMClient()
-        embed_client: Any = StubEmbedClient()
     else:
         api_key = os.environ.get("NVIDIA_API_KEY", "")
         if not api_key:
@@ -274,14 +273,21 @@ def _build_encoder(
                 "or pass --stub to use offline clients."
             )
         vlm = CosmosReason2Client(api_key=api_key)
-        embed_client = CosmosEmbed1Client(url=os.environ.get("COSMOS_EMBED1_URL", ""))
 
+    # Build the embedding client lazily — only when the visual arm is actually
+    # used. Avoids requiring the Cosmos-Embed1 endpoint (and its kwarg) under
+    # --no-visual reasoning-only runs.
     if no_visual:
         visual = None
-    elif cameras is not None:
-        visual = VisualArm(client=embed_client, cameras=cameras)
     else:
-        visual = VisualArm(client=embed_client)
+        embed_client: Any = (
+            StubEmbedClient() if stub
+            else CosmosEmbed1Client(cosmos_url=os.environ.get("COSMOS_EMBED1_URL", ""))
+        )
+        if cameras is not None:
+            visual = VisualArm(client=embed_client, cameras=cameras)
+        else:
+            visual = VisualArm(client=embed_client)
     return Encoder(
         vlm=vlm,
         vocabulary=DEFAULT_VOCABULARY,

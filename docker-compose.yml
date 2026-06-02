@@ -47,12 +47,24 @@ services:
       - gpu
 
   cosmos-reason2:
-    image: nvcr.io/nim/nvidia/cosmos-reason2-7b:latest
+    # Reason-2 8b (1.7.0) needs a CUDA 12.8 driver; host is 12.7 and the image's
+    # apt state blocks an in-place driver upgrade. Falling back to Reason 1, whose
+    # older NIM builds against CUDA <=12.6 and runs fine on the 12.7 driver.
+    image: nvcr.io/nim/nvidia/cosmos-reason1-7b:1.4.1
     container_name: discovery-cosmos-reason2
     env_file:
       - .env
     environment:
       NGC_API_KEY: ${NGC_API_KEY}
+      # Host driver is CUDA 12.7; the 1.7.0 NIM's VRAM auto-config calls it
+      # "too old" and inits CUDA in the parent, killing the engine fork.
+      # Force spawn + relax the mem auto-config to avoid that path.
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      NIM_RELAX_MEM_CONSTRAINTS: "1"
+      # Waymo FRONT video is 1920x1280; at 4fps an 8s window = 32 frames =
+      # 78.6M px, over the NIM's 25.7M default. Raise the cap with headroom.
+      VLLM_MAX_TOTAL_VIDEO_PIXELS: "104857600"
+    shm_size: "16gb"
     ports:
       - "8081:8000"
     deploy:

@@ -66,7 +66,7 @@ function ScoreBadgeRow({ scores }: { scores: JudgeProposalRow['scores'] }) {
   return (
     <div className="flex gap-1.5 flex-wrap">
       <Badge variant="outline" className="text-xs font-mono">
-        N {scores.novelty_score.toFixed(2)}
+        N {scores.novelty_score.toFixed(2)} (~{Math.round(Math.exp(scores.novelty_score))}× rarer)
       </Badge>
       <Badge
         variant="secondary"
@@ -84,6 +84,52 @@ function ScoreBadgeRow({ scores }: { scores: JudgeProposalRow['scores'] }) {
       </Badge>
     </div>
   )
+}
+
+// Legend explaining the N / P / D / R score badges.
+function ScoreLegend() {
+  return (
+    <div className="text-xs text-muted-foreground leading-relaxed">
+      <span className="font-mono">N</span> Novelty — e^N× rarer than chance (N 1≈3×, 2≈7×, 3≈20×)
+      {' · '}
+      <span className="font-mono">P</span> Plausibility (physically possible, 0–100%)
+      {' · '}
+      <span className="font-mono">D</span> Difficulty (challenges the AV stack, 0–100%)
+      {' · '}
+      <span className="font-mono">R</span> Final rank (N×0.4 + P×0.3 + D×0.3; higher = higher priority)
+    </div>
+  )
+}
+
+// Deterministic, human-readable scenario sentence built purely from the
+// composition's atoms (prefix:value). No model call -> grounded in the exact
+// tags, no hallucination. Describes WHAT to generate/look for.
+function buildScenario(constituents: string[]): string {
+  const byPrefix: Record<string, string[]> = {}
+  for (const c of constituents) {
+    const i = c.indexOf(':')
+    const p = i === -1 ? c : c.slice(0, i)
+    const v = i === -1 ? c : c.slice(i + 1)
+    ;(byPrefix[p] ||= []).push(v)
+  }
+  const one = (p: string) => byPrefix[p]?.[0]
+  const h = (s?: string) => (s ? s.replace(/_/g, ' ') : s)
+
+  const todMap: Record<string, string> = { day: 'in the daytime', night: 'at night', dusk_dawn: 'at dusk or dawn' }
+  const roadMap: Record<string, string> = { straight: 'on a straight road', intersection: 'at an intersection', curve: 'on a curving road', highway_ramp: 'on a highway ramp', parking_lot: 'in a parking lot' }
+  const tcMap: Record<string, string> = { traffic_light: 'at a traffic light', stop_sign: 'at a stop sign', yield_sign: 'at a yield sign', none: 'with no traffic control', construction_signals: 'near construction signals' }
+
+  const ego = one('ego_task') ? `The ego vehicle is ${h(one('ego_task'))}` : 'The ego vehicle is driving'
+  const road = one('road_geometry') ? (roadMap[one('road_geometry')!] ?? `on a ${h(one('road_geometry'))} road`) : ''
+  const tod = one('time_of_day') ? (todMap[one('time_of_day')!] ?? `during ${h(one('time_of_day'))}`) : ''
+  const env = [one('weather') ? `${h(one('weather'))} weather` : '', one('lighting') ? `${h(one('lighting'))} lighting` : ''].filter(Boolean).join(' with ')
+  const tc = one('traffic_control') ? (tcMap[one('traffic_control')!] ?? `with ${h(one('traffic_control'))}`) : ''
+  const agents = byPrefix['agents']?.length ? `with ${byPrefix['agents'].map(h).join(', ')} present` : ''
+  const conds = byPrefix['conditions']?.length ? `under ${byPrefix['conditions'].map(h).join(', ')}` : ''
+
+  const lead = [ego, road].filter(Boolean).join(' ')
+  const tail = [tod, env, tc, agents, conds].filter(Boolean).join(', ')
+  return tail ? `${lead}, ${tail}.` : `${lead}.`
 }
 
 // ---------------------------------------------------------------------------
@@ -429,8 +475,9 @@ export function JudgeTab() {
 
         {/* Proposals table */}
         <Card className="flex-1 min-h-0 flex flex-col">
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 space-y-1.5">
             <CardTitle className="text-base font-medium">Proposals</CardTitle>
+            <ScoreLegend />
           </CardHeader>
           <CardContent className="flex-1 min-h-0 p-0">
             <div className="overflow-auto h-full">
@@ -531,6 +578,17 @@ export function JudgeTab() {
           </div>
         </div>
 
+        {/* Scenario — deterministic human-readable description from the tags */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Scenario</CardTitle>
+            <p className="text-xs text-muted-foreground">Plain-language description of the scenario to generate / collect (derived from the tags below)</p>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-foreground">{buildScenario(selectedProposal.constituents)}</p>
+          </CardContent>
+        </Card>
+
         {/* Composition */}
         <Card>
           <CardHeader className="pb-3">
@@ -545,8 +603,18 @@ export function JudgeTab() {
               ))}
             </div>
             <ScoreBadgeRow scores={selectedProposal.scores} />
-            <div className="bg-muted/50 rounded-lg px-4 py-3 text-sm text-muted-foreground italic">
-              "{selectedProposal.plausibility_justification}"
+            <ScoreLegend />
+            <div>
+              <div className="text-xs font-medium text-foreground mb-1">
+                Plausibility assessment{' '}
+                <span className="font-normal text-muted-foreground">
+                  — the scorer's text-model reasoning about whether these
+                  conditions can co-occur. Not a description of an observed clip.
+                </span>
+              </div>
+              <div className="bg-muted/50 rounded-lg px-4 py-3 text-sm text-muted-foreground italic">
+                "{selectedProposal.plausibility_justification}"
+              </div>
             </div>
           </CardContent>
         </Card>

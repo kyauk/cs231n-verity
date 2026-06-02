@@ -16,6 +16,18 @@ from typing import Any
 VOCABULARY_VERSION = "1.0"
 
 
+def _not_in_vocab(value: Any, vocab: "frozenset[str]") -> bool:
+    """True if ``value`` should count as a vocabulary violation.
+
+    Guards against non-string scalars (dict/list/int) the VLM occasionally
+    emits where a scalar tag is expected. Doing a bare ``value in frozenset``
+    on an unhashable dict raises ``TypeError: unhashable type: 'dict'`` and
+    escapes the retry loop as an "unknown" failure; treating it as a normal
+    violation instead lets the stricter-prompt retry recover the window.
+    """
+    return not isinstance(value, str) or value not in vocab
+
+
 # ---------------------------------------------------------------------------
 # Tag sets
 # ---------------------------------------------------------------------------
@@ -129,7 +141,7 @@ class Vocabulary:
             if not isinstance(agents, list):
                 violations.append(f"agents must be a list, got {type(agents).__name__}")
             else:
-                bad = [a for a in agents if a not in self.agents]
+                bad = [a for a in agents if _not_in_vocab(a, self.agents)]
                 if bad:
                     violations.append(
                         f"agents contains unknown tags: {bad}. "
@@ -140,19 +152,19 @@ class Vocabulary:
         env = fields.get("environment") or {}
         if env:
             w = env.get("weather")
-            if w is not None and w not in self.weather:
+            if w is not None and _not_in_vocab(w, self.weather):
                 violations.append(
                     f"environment.weather={w!r} not in vocabulary. "
                     f"Valid: {sorted(self.weather)}"
                 )
             tod = env.get("time_of_day")
-            if tod is not None and tod not in self.time_of_day:
+            if tod is not None and _not_in_vocab(tod, self.time_of_day):
                 violations.append(
                     f"environment.time_of_day={tod!r} not in vocabulary. "
                     f"Valid: {sorted(self.time_of_day)}"
                 )
             lc = env.get("lighting_condition")
-            if lc is not None and lc not in self.lighting_condition:
+            if lc is not None and _not_in_vocab(lc, self.lighting_condition):
                 violations.append(
                     f"environment.lighting_condition={lc!r} not in vocabulary. "
                     f"Valid: {sorted(self.lighting_condition)}"
@@ -162,7 +174,7 @@ class Vocabulary:
         road = fields.get("road") or {}
         if road:
             geo = road.get("geometry")
-            if geo is not None and geo not in self.road_geometry:
+            if geo is not None and _not_in_vocab(geo, self.road_geometry):
                 violations.append(
                     f"road.geometry={geo!r} not in vocabulary. "
                     f"Valid: {sorted(self.road_geometry)}"
@@ -181,7 +193,7 @@ class Vocabulary:
 
         # traffic_control
         tc = fields.get("traffic_control")
-        if tc is not None and tc not in self.traffic_control:
+        if tc is not None and _not_in_vocab(tc, self.traffic_control):
             violations.append(
                 f"traffic_control={tc!r} not in vocabulary. "
                 f"Valid: {sorted(self.traffic_control)}"
@@ -189,7 +201,7 @@ class Vocabulary:
 
         # ego_task
         et = fields.get("ego_task")
-        if et is not None and et not in self.ego_task:
+        if et is not None and _not_in_vocab(et, self.ego_task):
             violations.append(
                 f"ego_task={et!r} not in vocabulary. "
                 f"Valid: {sorted(self.ego_task)}"
@@ -203,7 +215,7 @@ class Vocabulary:
                     f"conditions must be a list, got {type(conds).__name__}"
                 )
             else:
-                bad = [c for c in conds if c not in self.conditions]
+                bad = [c for c in conds if _not_in_vocab(c, self.conditions)]
                 if bad:
                     violations.append(
                         f"conditions contains unknown tags: {bad}. "
