@@ -577,7 +577,7 @@ def main() -> int:
             # Tool-augmented four-actor ReAct debate. VLM follow-ups re-query the
             # clip through the hosted NIM vision API (no local model load).
             debate_output, _proposal_metadata = run_tool_augmented_debate(
-                record, description.media_refs
+                record, description.media_refs, rounds=args.debate_rounds
             )
             debate_outputs.append(debate_output)
         except Exception as error:  # noqa: BLE001

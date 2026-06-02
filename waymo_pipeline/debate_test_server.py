@@ -77,6 +77,7 @@ async def run_debate(
     anomaly_rationale: str = Form(""),
     regression_suite: str = Form(""),
     severity_hint: str = Form("medium"),
+    rounds: int = Form(2),
 ) -> JSONResponse:
     """Run description (optional) + tool-augmented debate on one uploaded clip.
 
@@ -145,7 +146,7 @@ async def run_debate(
 
         # --- Tool-augmented debate (VLM follow-ups hit the NIM API) -----------
         debate_output, _proposal_metadata = run_tool_augmented_debate(
-            record, [os.path.abspath(tmp_path)]
+            record, [os.path.abspath(tmp_path)], rounds=rounds
         )
         proposal = build_proposal_from_debate_output(debate_output, run_id)
         meta = debate_output.metadata or {}

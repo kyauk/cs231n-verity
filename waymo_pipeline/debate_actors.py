@@ -243,6 +243,64 @@ def _build_arbiter_message(
     )
 
 
+def _build_risk_rebuttal_message(
+    context: DebateContext,
+    scene_output: dict[str, Any],
+    prev_risk_output: dict[str, Any],
+    coverage_output: dict[str, Any],
+    round_idx: int,
+) -> str:
+    counterarguments = coverage_output.get("counterarguments", []) or []
+    if isinstance(counterarguments, list):
+        counter_text = "\n".join(
+            f"- {str(item)}" for item in counterarguments
+        ) or "(none stated)"
+    else:
+        counter_text = str(counterarguments)
+    rebuttal_summary = str(coverage_output.get("rebuttal_summary", "")).strip()
+
+    return (
+        f"This is debate round {round_idx}. The Coverage Analyst is pushing back "
+        "on adding this scenario to the regression suite. Defend or revise your "
+        "risk assessment in response.\n\n"
+        f"Scene description:\n{context.scene_description}\n\n"
+        f"Scene Analyst findings (JSON):\n{json.dumps(scene_output, indent=2)}\n\n"
+        f"Your previous risk assessment (JSON):\n{json.dumps(prev_risk_output, indent=2)}\n\n"
+        f"Coverage Analyst's counterarguments:\n{counter_text}\n\n"
+        f"Coverage Analyst's rebuttal summary:\n{rebuttal_summary or '(none stated)'}\n\n"
+        "Your task: address each counterargument directly — explain why the "
+        "safety risk still warrants a regression test, or concede and adjust your "
+        "assessment where the Coverage Analyst is right. You may call "
+        "safety_taxonomy_lookup again if it strengthens your rebuttal. Re-affirm or "
+        "update your risk_level, affected_capability, and affected_odds, then finish "
+        "with the required JSON."
+    )
+
+
+def _build_coverage_rebuttal_message(
+    context: DebateContext,
+    prev_coverage_output: dict[str, Any],
+    risk_output: dict[str, Any],
+    scene_output: dict[str, Any],
+    round_idx: int,
+) -> str:
+    return (
+        f"This is debate round {round_idx}. The Risk Assessor has responded to "
+        "your counterarguments. Press your strongest remaining objections or "
+        "concede where the rebuttal is convincing.\n\n"
+        f"Scene Analyst findings (JSON):\n{json.dumps(scene_output, indent=2)}\n\n"
+        f"Existing regression suite:\n{_format_suite(context.regression_suite)}\n\n"
+        f"Risk Assessor's latest assessment (JSON):\n{json.dumps(risk_output, indent=2)}\n\n"
+        f"Your previous counterarguments (JSON):\n{json.dumps(prev_coverage_output, indent=2)}\n\n"
+        "Your task: react to the Risk Assessor's rebuttal. Drop counterarguments "
+        "that no longer hold, sharpen the ones that do, and add new ones if the "
+        "rebuttal exposed a weakness. You may call suite_similarity again to ground "
+        "a coverage claim. Update your counterarguments and rebuttal_summary to "
+        "reflect the state of the debate after this exchange, then finish with the "
+        "required JSON."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Transcript / rationale helpers
 # ---------------------------------------------------------------------------
@@ -496,13 +554,21 @@ def _make_actor_llm_call():
 def run_tool_augmented_debate(
     record: DebateInputRecord,
     media_refs: list[str],
+    rounds: int = 1,
 ) -> tuple[DebateOutputRecord, dict[str, Any]]:
     """Run the four-actor tool-augmented debate for one window.
+
+    The Scene Analyst and Synthesis Arbiter run once. The Risk Assessor and
+    Coverage Analyst exchange rebuttals over ``rounds`` rounds: round 1 is the
+    opening (Risk then Coverage), and rounds 2..N let each side respond to the
+    other's latest argument. ``rounds=1`` reproduces the original single pass.
 
     Returns a backward-compatible :class:`DebateOutputRecord` alongside the
     raw ``proposal_metadata`` dict so Step 2 can adopt the richer per-actor
     fields directly without re-parsing JSONL rows.
     """
+
+    rounds = max(1, int(rounds))
 
     # Local import to avoid circular import at module load time.
     from waymo_pipeline.waymo_describe_and_debate import _emit_pipeline_progress
@@ -548,49 +614,75 @@ def run_tool_augmented_debate(
     )
     _apply_merged_final_output(scene_contribution, scene_output)
 
-    _emit_pipeline_progress(
-        "debate_round",
-        "Risk Assessor",
-        "Grounding risk in the AV safety capability taxonomy...",
-    )
-    risk_contribution = run_actor(
-        actor_name="Risk Assessor",
-        system_prompt=RISK_ASSESSOR_SYSTEM_PROMPT,
-        available_tools=["safety_taxonomy_lookup"],
-        user_message=_build_risk_assessor_message(context, scene_output),
-        context=context,
-        max_steps=max_steps,
-        llm_call=llm_call,
-        required_output_keys=_RISK_OUTPUT_KEYS,
-    )
-    risk_output = _merge_actor_output(
-        risk_contribution,
-        _RISK_OUTPUT_KEYS,
-        _fallback_risk_output(context, scene_output),
-    )
-    _apply_merged_final_output(risk_contribution, risk_output)
+    risk_contributions: list[ActorContribution] = []
+    coverage_contributions: list[ActorContribution] = []
+    risk_output: dict[str, Any] = {}
+    coverage_output: dict[str, Any] = {}
 
-    _emit_pipeline_progress(
-        "debate_round",
-        "Coverage Analyst",
-        "Comparing scenario against existing regression suite...",
-    )
-    coverage_contribution = run_actor(
-        actor_name="Coverage Analyst",
-        system_prompt=COVERAGE_ANALYST_SYSTEM_PROMPT,
-        available_tools=["suite_similarity"],
-        user_message=_build_coverage_analyst_message(context, scene_output),
-        context=context,
-        max_steps=max_steps,
-        llm_call=llm_call,
-        required_output_keys=_COVERAGE_OUTPUT_KEYS,
-    )
-    coverage_output = _merge_actor_output(
-        coverage_contribution,
-        _COVERAGE_OUTPUT_KEYS,
-        _fallback_coverage_output(),
-    )
-    _apply_merged_final_output(coverage_contribution, coverage_output)
+    for round_idx in range(1, rounds + 1):
+        round_suffix = f" (round {round_idx}/{rounds})" if rounds > 1 else ""
+
+        if round_idx == 1:
+            risk_message = _build_risk_assessor_message(context, scene_output)
+            risk_detail = "Grounding risk in the AV safety capability taxonomy..."
+        else:
+            risk_message = _build_risk_rebuttal_message(
+                context, scene_output, risk_output, coverage_output, round_idx
+            )
+            risk_detail = "Rebutting the Coverage Analyst's counterarguments..."
+        _emit_pipeline_progress(
+            "debate_round",
+            f"Risk Assessor{round_suffix}",
+            risk_detail,
+        )
+        risk_contribution = run_actor(
+            actor_name="Risk Assessor",
+            system_prompt=RISK_ASSESSOR_SYSTEM_PROMPT,
+            available_tools=["safety_taxonomy_lookup"],
+            user_message=risk_message,
+            context=context,
+            max_steps=max_steps,
+            llm_call=llm_call,
+            required_output_keys=_RISK_OUTPUT_KEYS,
+        )
+        risk_output = _merge_actor_output(
+            risk_contribution,
+            _RISK_OUTPUT_KEYS,
+            _fallback_risk_output(context, scene_output),
+        )
+        _apply_merged_final_output(risk_contribution, risk_output)
+        risk_contributions.append(risk_contribution)
+
+        if round_idx == 1:
+            coverage_message = _build_coverage_analyst_message(context, scene_output)
+            coverage_detail = "Comparing scenario against existing regression suite..."
+        else:
+            coverage_message = _build_coverage_rebuttal_message(
+                context, coverage_output, risk_output, scene_output, round_idx
+            )
+            coverage_detail = "Responding to the Risk Assessor's rebuttal..."
+        _emit_pipeline_progress(
+            "debate_round",
+            f"Coverage Analyst{round_suffix}",
+            coverage_detail,
+        )
+        coverage_contribution = run_actor(
+            actor_name="Coverage Analyst",
+            system_prompt=COVERAGE_ANALYST_SYSTEM_PROMPT,
+            available_tools=["suite_similarity"],
+            user_message=coverage_message,
+            context=context,
+            max_steps=max_steps,
+            llm_call=llm_call,
+            required_output_keys=_COVERAGE_OUTPUT_KEYS,
+        )
+        coverage_output = _merge_actor_output(
+            coverage_contribution,
+            _COVERAGE_OUTPUT_KEYS,
+            _fallback_coverage_output(),
+        )
+        _apply_merged_final_output(coverage_contribution, coverage_output)
+        coverage_contributions.append(coverage_contribution)
 
     _emit_pipeline_progress(
         "debate_judge",
@@ -614,15 +706,24 @@ def run_tool_augmented_debate(
     )
     arbiter_output = arbiter_contribution.final_output or {}
 
+    # Ordered for scoring/aggregation: scene, all risk turns, all coverage turns,
+    # arbiter. Transcript is ordered chronologically (interleaved per round) so the
+    # back-and-forth reads naturally in the staged-reveal UI.
     all_contributions = [
         scene_contribution,
-        risk_contribution,
-        coverage_contribution,
+        *risk_contributions,
+        *coverage_contributions,
         arbiter_contribution,
     ]
 
+    transcript_order: list[ActorContribution] = [scene_contribution]
+    for risk_turn, coverage_turn in zip(risk_contributions, coverage_contributions):
+        transcript_order.append(risk_turn)
+        transcript_order.append(coverage_turn)
+    transcript_order.append(arbiter_contribution)
+
     debate_history: list[str] = []
-    for contribution in all_contributions:
+    for contribution in transcript_order:
         debate_history.extend(_actor_transcript_lines(contribution))
 
     proposal_decision, decision, recommendation = _coerce_decision(
@@ -632,7 +733,7 @@ def run_tool_augmented_debate(
     risk_level = str(risk_output.get("risk_level", "")).strip().lower() or "medium"
 
     tool_evidence = summarize_tool_evidence(all_contributions)
-    max_suite_overlap = extract_max_suite_overlap([coverage_contribution])
+    max_suite_overlap = extract_max_suite_overlap(coverage_contributions)
     had_vlm_failures = scene_analyst_had_vlm_failures(scene_contribution)
 
     proposal_confidence = apply_evidence_penalty(
@@ -656,6 +757,7 @@ def run_tool_augmented_debate(
 
     proposal_metadata: dict[str, Any] = {
         "debate_mode": "react_tool_augmented",
+        "debate_rounds": rounds,
         "debate_history": debate_history,
         "capability_tag": capability_tag,
         "judge_raw_output": arbiter_contribution.raw_llm_output,
