@@ -21,14 +21,12 @@ import subprocess
 import tempfile
 import threading
 
-
 import numpy as np
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from waymo_pipeline.io import read_jsonl
 from waymo_pipeline.models.scene_window import (
     EXPECTED_CHANNELS,
     SceneWindow,
@@ -67,15 +65,26 @@ def parse_args() -> argparse.Namespace:
 
 def iter_scenes(path: str):
     """Stream-parse SceneWindow records from a JSONL file."""
-    for row in read_jsonl(path):
-        yield SceneWindow.model_validate(row)
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                yield SceneWindow.model_validate(json.loads(line))
 
 
 def load_done_ids(path: str | None) -> set[str]:
     """Load window_id values already embedded, for resume support."""
-    if not path:
+    if not path or not os.path.isfile(path):
         return set()
-    return {str(r["window_id"]) for r in read_jsonl(path) if "window_id" in r}
+    done: set[str] = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                wid = json.loads(line).get("window_id")
+                if wid is not None:
+                    done.add(str(wid))
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return done
 
 
 def make_windows(scene: SceneWindow, window_size: int, window_stride: int):
@@ -205,28 +214,18 @@ def embed_window(
     cosmos_url: str,
     clip_fps: int,
 ) -> WindowEmbeddingRecord:
-    """Embed one temporal window across the Waymo five-camera rig (5 x 256d).
-
-    Raises ``RuntimeError`` if any camera clip is unavailable — zero-padding
-    missing cameras would silently corrupt the embedding space.
-    """
+    """Embed one temporal window across the Waymo five-camera rig (5 x 256d)."""
     tmp = tempfile.mkdtemp(prefix="cosmos_waymo_")
     try:
         per_camera: list[np.ndarray] = []
-        missing: list[str] = []
         for channel in EXPECTED_CHANNELS:
             clip_path = render_clip_for_window(
                 fs, scene, start, end, channel, tmp, clip_fps
             )
             if not clip_path:
-                missing.append(channel)
+                per_camera.append(np.zeros(EMBED_DIM, dtype=np.float32))
                 continue
             per_camera.append(embed_clip(clip_path, cosmos_url))
-        if missing:
-            raise RuntimeError(
-                f"window {window_id}: camera clips unavailable for {missing}; "
-                "cannot produce a valid embedding without all cameras"
-            )
 
         concat = np.concatenate(per_camera)
         vec = concat / (np.linalg.norm(concat) + 1e-12)

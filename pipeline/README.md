@@ -26,10 +26,9 @@ Lego-block pipeline for AV safety scenario discovery. Every module is a standalo
                              │  WindowStorage / FlatMP4Storage
                              ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  Module 2 — Encoder (reasoning + visual arms)                 │
-│  ✅ Reasoning arm: Cosmos-Reason2 → structured scene JSON     │
-│  ✅ Visual arm:    Cosmos-Embed1 → 1280-d embedding (opt-in)  │
-│  Output: SchemaRecord per (window, arm)                       │
+│  Module 2 — Encoder (reasoning arm)                           │
+│  ✅ Calls Cosmos-Reason2 → structured scene JSON              │
+│  Output: SchemaRecord per window                              │
 └────────────────────────────┬──────────────────────────────────┘
                              │  list[SchemaRecord]
                              ▼
@@ -156,7 +155,7 @@ Both satisfy the `WindowStorageBase` Protocol in [`pipeline/interfaces/window.py
 | Class | Layout it reads | When to use |
 |---|---|---|
 | `WindowStorage` | Canonical ingested layout (`windows/{id}/{idx}/camera_*.mp4` + manifest, written by `IngestionPipeline`) | Standard path — sliced 8-second windows with synced pose. |
-| `FlatMP4Storage` | Flat bucket of MP4 files; filename is the segment ID; one window per MP4 | Quick analysis on existing MP4 data without ingestion. Constructor requires `cameras: list[str]` so the visual-arm embedding dimensionality is explicit. |
+| `FlatMP4Storage` | Flat bucket of MP4 files; filename is the segment ID; one window per MP4 | Quick analysis on existing MP4 data without ingestion. Constructor requires `cameras: list[str]` so the filename convention is unambiguous. |
 
 `FlatMP4Storage` synthesizes a `WindowManifest` with `source_format="flat_mp4"`, `frame_count=0`, `cameras=<configured>`, `pose_summary=None`. `window_idx` is always 0; non-zero requests raise `WindowStorageError`.
 
@@ -194,7 +193,7 @@ For one-off "I just have MP4s already" cases — don't write an adapter. Use `Fl
 | Field | Type | Notes |
 |---|---|---|
 | `window_id` | `WindowKey` | Identifies the annotated window |
-| `arm` | `str` | `"reasoning"` or `"visual"` (visual arm produced when Encoder is constructed with `visual_arm=`) |
+| `arm` | `str` | `"reasoning"` in v1 — the visual arm was removed. The field stays a `str` (not a `Literal`) so v2's continuous-discovery channel can populate it without an interface change. |
 | `schema_version` | `str` | `"1.0"` |
 | `prompt_template_id` | `str \| None` | `"v1_describe"` |
 | `fields` | `dict` | All 6 vocabulary keys present on success; may be null-filled on failure |
@@ -260,7 +259,7 @@ All values drawn from the locked v1.0 vocabulary (`pipeline/modules/encoder/voca
 | `observed_joint` | `float` | Fraction of windows containing all constituents |
 | `novelty_score` | `float` | `ln(expected / max(observed, ε))` where `ε = 1/(10*N)` |
 | `motivating_scene_ids` | `list[WindowKey]` | Windows where all atoms co-occur |
-| `arm` | `str` | Propagated from the SchemaRecords this proposal was derived from (`"reasoning"` or `"visual"`) |
+| `arm` | `str` | Propagated from the SchemaRecords this proposal was derived from (`"reasoning"` in v1) |
 
 `succeeded` property (inherited from proposal contract): `novelty_score > 0` indicates expected >> observed.
 
@@ -406,7 +405,7 @@ Proposal is still accepted/rejected on plausibility alone.
 |---|---|---|
 | `rater_id` | `str` | Identifier provided by rater at session start |
 | `proposal_id` | `str` | Matches `CompositionProposal.composition_id` |
-| `arm` | `str` | `"reasoning"` or `"visual"` — injected server-side, never from rater |
+| `arm` | `str` | Encoder arm in v1 always `"reasoning"`; in dev_dashboard this field is reused to carry the source-pool label (`"verity"` / `"random"` / `"naive_rare"`). Injected server-side, never from rater. |
 | `coherence_score` | `int` | 1–5 |
 | `usefulness_score` | `int` | 1–5 |
 | `timestamp` | `str` | ISO-8601 UTC |

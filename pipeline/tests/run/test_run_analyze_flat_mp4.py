@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pipeline.interfaces.window import WindowKey
-from pipeline.run import _build_encoder, _build_parser, _run_analyze
+from pipeline.run import _build_parser, _run_analyze
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,6 @@ def _flat_args(output: Path, **overrides: object) -> Namespace:
         output=str(output),
         max_workers=2,
         stub=True,
-        no_visual=True,
         cache_root=None,
         sign_as=None,
         storage_mode="flat_mp4",
@@ -117,7 +116,7 @@ def test_run_analyze_canonical_mode_still_uses_window_storage(tmp_path: Path) ->
 
     args = Namespace(
         bucket="gs://b/v", output=str(tmp_path / "out"),
-        max_workers=2, stub=True, no_visual=True, cache_root=None, sign_as=None,
+        max_workers=2, stub=True, cache_root=None, sign_as=None,
         storage_mode="canonical", cameras=None,
     )
     with patch("pipeline.modules.storage.WindowStorage", return_value=fake):
@@ -125,36 +124,7 @@ def test_run_analyze_canonical_mode_still_uses_window_storage(tmp_path: Path) ->
     assert rc == 0
 
 
-# ---------------------------------------------------------------------------
-# _build_encoder: cameras kwarg threads through to VisualArm
-# ---------------------------------------------------------------------------
-
-def test_build_encoder_stub_passes_cameras_to_visual_arm(tmp_path: Path) -> None:
-    """When cameras=[...], VisualArm must be constructed with that camera list."""
-    with patch("pipeline.modules.encoder.VisualArm") as fake_visual:
-        _build_encoder(
-            stub=True, no_visual=False, cache_root=str(tmp_path),
-            cameras=["FRONT"],
-        )
-    fake_visual.assert_called_once()
-    assert fake_visual.call_args.kwargs.get("cameras") == ["FRONT"]
-
-
-def test_build_encoder_no_cameras_uses_visual_arm_default(tmp_path: Path) -> None:
-    """When cameras is None, VisualArm is constructed without an explicit cameras kwarg."""
-    with patch("pipeline.modules.encoder.VisualArm") as fake_visual:
-        _build_encoder(
-            stub=True, no_visual=False, cache_root=str(tmp_path), cameras=None,
-        )
-    fake_visual.assert_called_once()
-    assert "cameras" not in fake_visual.call_args.kwargs
-
-
-def test_build_encoder_no_visual_ignores_cameras(tmp_path: Path) -> None:
-    """no_visual=True overrides cameras — no VisualArm constructed at all."""
-    with patch("pipeline.modules.encoder.VisualArm") as fake_visual:
-        _build_encoder(
-            stub=True, no_visual=True, cache_root=str(tmp_path),
-            cameras=["FRONT"],
-        )
-    fake_visual.assert_not_called()
+# Note: tests for `cameras` threading into the visual arm were removed when
+# the visual arm itself was removed (v1). `cameras` is now an input to
+# FlatMP4Storage's filename convention; that path is covered by
+# test_run_analyze_flat_mp4_constructs_flatmp4storage above.

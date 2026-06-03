@@ -53,6 +53,21 @@ class SceneWindow(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class WindowSpec(BaseModel):
+    """Identifies one temporal window within a scene."""
+
+    window_id: str
+    scene_token_hex: str
+    log_id: str
+    window_index: int
+    start_tick_idx: int
+    end_tick_idx: int
+    start_ts: int
+    end_ts: int
+    camera_set: list[str] = Field(default_factory=list)
+    tick_count: int
+
+
 class WindowEmbeddingRecord(BaseModel):
     """Output contract for one embedded temporal window."""
 

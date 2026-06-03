@@ -272,12 +272,7 @@ def _process_one(
     """Process one segment end-to-end in a thread. Returns (seg_id, url_map | None)."""
     # Each thread needs its own GCS clients — neither gcsfs nor storage.Client is thread-safe.
     fs = gcsfs.GCSFileSystem(token=creds)
-    if not project:
-        raise RuntimeError(
-            "google_auth_default returned no project. Set GCLOUD_PROJECT or pass "
-            "--project, or ensure the environment has a default project configured."
-        )
-    gcs_client = storage.Client(credentials=creds, project=project)
+    gcs_client = storage.Client(credentials=creds, project=project or "nvidia-adr")
 
     print(f"[{seg_index}/{total}] Segment: {seg_id}")
 

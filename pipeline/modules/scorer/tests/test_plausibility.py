@@ -52,9 +52,25 @@ class TestDescribeComposition:
         for atom in CONSTITUENTS:
             assert atom in desc
 
-    def test_contains_frequency_info(self):
+    def test_does_not_leak_rarity_statistics(self):
+        """FIRST_RUN_FINDINGS Issue 5 regression: the plausibility prompt must
+        NOT contain the joint-frequency / "Statistical context" block — feeding
+        rarity into the plausibility judge made the model equate "rare in this
+        sample" with "physically impossible," zeroing out every accepted
+        proposal. Rarity is captured separately by novelty_score; the
+        plausibility prompt must judge physical/behavioral co-occurrence only.
+        """
         desc = describe_composition(COMP_ID, CONSTITUENTS, MARGINAL, EXPECTED_JOINT, OBSERVED_JOINT, 0)
-        assert "15.0%" in desc or "0.15" in desc or "15%" in desc
+        # The leaky language used to include "Statistical context" with the
+        # frequency numbers. None of these strings must appear.
+        for forbidden in ("Statistical context",
+                          "Observed joint", "Expected joint",
+                          "15.0%", "15%", "0.15"):
+            assert forbidden not in desc, (
+                f"plausibility prompt leaked {forbidden!r} — see FIRST_RUN_FINDINGS Issue 5"
+            )
+        # The explicit guard against rarity-as-implausibility must be present.
+        assert "statistical rarity is not the same as implausibility" in desc.lower()
 
     def test_different_orderings_differ(self):
         d0 = describe_composition(COMP_ID, CONSTITUENTS, MARGINAL, EXPECTED_JOINT, OBSERVED_JOINT, 0)

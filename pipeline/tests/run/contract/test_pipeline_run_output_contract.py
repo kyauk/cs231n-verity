@@ -40,7 +40,7 @@ from pipeline.run import _run_analyze, _run_report
 def _build_minimal_analyze_args(output: Path) -> Namespace:
     return Namespace(
         bucket="gs://b/v", output=str(output), max_workers=2,
-        stub=True, no_visual=True, cache_root=None, sign_as=None,
+        stub=True, cache_root=None, sign_as=None,
         storage_mode="canonical", cameras=None,
     )
 

@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -26,8 +27,6 @@ import sys
 import numpy as np
 from dotenv import load_dotenv
 from sklearn.preprocessing import normalize
-
-from waymo_pipeline.io import read_jsonl, write_jsonl
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -40,40 +39,19 @@ log = logging.getLogger(__name__)
 def load_embeddings(
     path: str, embedding_dim: int | None = None
 ) -> tuple[np.ndarray, list[str], list[dict]]:
-    """Load embedding matrix, window IDs, and raw rows from a JSONL file.
-
-    Raises ``ValueError`` if any row is missing the ``embedding`` key or if
-    the embeddings have inconsistent lengths — silently truncating to the
-    shortest vector would corrupt the entire clustering run.
-    """
+    """Load embedding matrix, window IDs, and raw rows from a JSONL file."""
     log.info("Loading embeddings from %s ...", path)
-    rows = read_jsonl(path)
+    rows: list[dict] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
     if not rows:
         return np.array([]).reshape(0, 0), [], []
 
-    missing = [i for i, r in enumerate(rows) if "embedding" not in r]
-    if missing:
-        raise ValueError(
-            f"Rows at indices {missing[:5]}{'...' if len(missing) > 5 else ''} "
-            "are missing the 'embedding' key"
-        )
-
-    lengths = {len(r["embedding"]) for r in rows}
-    if len(lengths) > 1:
-        raise ValueError(
-            f"Inconsistent embedding dimensions in {path}: found {sorted(lengths)}. "
-            "All embeddings must have the same length."
-        )
-
-    native_dim = next(iter(lengths))
-    dim = embedding_dim or native_dim
-    if embedding_dim and embedding_dim != native_dim:
-        log.warning(
-            "Requested dim=%d but embeddings are %d-d; truncating.",
-            embedding_dim, native_dim,
-        )
-
-    X = np.array([r["embedding"][:dim] for r in rows], dtype=np.float32)
+    embeddings = [r["embedding"] for r in rows]
+    dim = embedding_dim or min(len(e) for e in embeddings)
+    X = np.array([e[:dim] for e in embeddings], dtype=np.float32)
     window_ids = [r.get("window_id", "") for r in rows]
     log.info("Loaded %d embeddings of dimension %d", len(window_ids), X.shape[1])
     return X, window_ids, rows
@@ -223,27 +201,27 @@ def main() -> int:
     log.info("Saved: %s", args.output_npz)
 
     # per-window cluster metadata JSONL
-    cluster_rows = [
-        {
-            "window_id": wid,
-            "cluster_label": int(labels[i]),
-            "cluster_probability": float(probabilities[i]),
-            "glosh_score": float(outlier_scores[i]),
-            "coord_3d": [float(c) for c in reduced_3d[i]],
-        }
-        for i, wid in enumerate(window_ids)
-    ]
-    write_jsonl(args.output_jsonl, cluster_rows)
+    os.makedirs(os.path.dirname(args.output_jsonl) or ".", exist_ok=True)
+    with open(args.output_jsonl, "w", encoding="utf-8") as f:
+        for i, wid in enumerate(window_ids):
+            f.write(json.dumps({
+                "window_id": wid,
+                "cluster_label": int(labels[i]),
+                "cluster_probability": float(probabilities[i]),
+                "glosh_score": float(outlier_scores[i]),
+                "coord_3d": [float(c) for c in reduced_3d[i]],
+            }) + "\n")
     log.info("Saved: %s", args.output_jsonl)
 
     # anomaly-ranked flagged windows (AnomalyResultRecord contract)
     order = sorted(range(len(window_ids)), key=lambda i: -float(outlier_scores[i]))
     row_by_window = {r.get("window_id", ""): r for r in rows}
-    flagged_rows = []
-    for rank, i in enumerate(order, start=1):
+    os.makedirs(os.path.dirname(args.flagged_jsonl) or ".", exist_ok=True)
+    with open(args.flagged_jsonl, "w", encoding="utf-8") as f:
+        for rank, i in enumerate(order, start=1):
             wid = window_ids[i]
             src = row_by_window.get(wid, {})
-            flagged_rows.append({
+            f.write(json.dumps({
                 "window_id": wid,
                 "scene_token_hex": src.get("scene_token_hex", wid),
                 "log_id": src.get("log_id", "waymo"),
@@ -257,8 +235,7 @@ def main() -> int:
                 "anomaly_rank": rank,
                 "quality": src.get("quality", {}),
                 "metadata": {**src.get("metadata", {}), "dataset": "waymo"},
-            })
-    write_jsonl(args.flagged_jsonl, flagged_rows)
+            }) + "\n")
     log.info("Saved: %s", args.flagged_jsonl)
 
     return 0

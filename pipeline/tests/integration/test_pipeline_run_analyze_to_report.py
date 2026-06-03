@@ -110,7 +110,7 @@ def test_analyze_output_is_consumable_by_report(tmp_path: Path) -> None:
 
     analyze_args = Namespace(
         bucket="gs://b/v", output=str(tmp_path / "session"),
-        max_workers=2, stub=True, no_visual=True,
+        max_workers=2, stub=True,
         cache_root=None, sign_as=None,
         storage_mode="canonical", cameras=None,
     )

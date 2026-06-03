@@ -234,25 +234,16 @@ def extract_scene_windows(
 def _parse_gcs_uri(uri: str) -> tuple[str, str]:
     """Split ``gs://bucket/prefix`` into ``(bucket, prefix)``.
 
-    Returns the module-level env-var defaults when ``uri`` is empty so the
-    script is runnable without arguments in the standard Waymo configuration.
-    Raises ``ValueError`` for a non-empty string that is not a valid GCS URI
-    — silently falling back to the wrong dataset bucket would be worse than
-    an explicit error.
+    Falls back to the module-level defaults when the URI is absent or not a
+    recognised GCS URI so the script remains runnable without arguments.
     """
     uri = uri.strip().rstrip("/")
-    if not uri:
-        return SOURCE_BUCKET, SOURCE_PREFIX
     if uri.startswith("gs://"):
         without_scheme = uri[len("gs://"):]
         bucket, _, prefix = without_scheme.partition("/")
-        if not bucket:
-            raise ValueError(f"GCS URI has no bucket: {uri!r}")
         return bucket, prefix or SOURCE_PREFIX
-    raise ValueError(
-        f"Expected a GCS URI starting with 'gs://', got: {uri!r}. "
-        "Pass an empty string to use the default dataset location."
-    )
+    # Not a GCS URI — honour env-var overrides then hardcoded defaults.
+    return SOURCE_BUCKET, SOURCE_PREFIX
 
 
 def main() -> None:

@@ -39,7 +39,6 @@ def _analyze_args(output: Path, **overrides: object) -> Namespace:
         output=str(output),
         max_workers=2,
         stub=True,
-        no_visual=True,  # visual arm is exercised separately; keep this minimal
         cache_root=None,
         sign_as=None,
         storage_mode="canonical",
@@ -56,7 +55,7 @@ def _analyze_args(output: Path, **overrides: object) -> Namespace:
 def test_build_encoder_without_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="NVIDIA_API_KEY"):
-        _build_encoder(stub=False, no_visual=True, cache_root=None)
+        _build_encoder(stub=False, cache_root=None)
 
 
 def test_build_scorer_without_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,7 +65,7 @@ def test_build_scorer_without_api_key_raises(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_build_encoder_stub_path(tmp_path: Path) -> None:
-    enc = _build_encoder(stub=True, no_visual=True, cache_root=str(tmp_path))
+    enc = _build_encoder(stub=True, cache_root=str(tmp_path))
     assert enc is not None  # constructs cleanly
 
 

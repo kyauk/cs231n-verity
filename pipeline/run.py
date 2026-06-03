@@ -78,8 +78,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--stub", action="store_true",
                            help="Use stub clients instead of calling NVIDIA NIM "
                                 "(offline / CI mode).")
-    p_analyze.add_argument("--no-visual", action="store_true",
-                           help="Skip the visual arm (reasoning arm only).")
     p_analyze.add_argument("--cache-root",
                            help="Override cache root (default: project /cache).")
     p_analyze.add_argument("--sign-as",
@@ -243,24 +241,17 @@ def _run_ingest(args: argparse.Namespace) -> int:
 
 def _build_encoder(
     stub: bool,
-    no_visual: bool,
     cache_root: str | None,
-    cameras: list[str] | None = None,
 ) -> Any:
     """Build the Encoder with production or stub clients per --stub.
 
-    Visual arm is on by default and off with --no-visual. Stub mode swaps in
-    the offline clients but keeps the visual arm wired (so the offline path
-    exercises the same code as production).
-
-    `cameras`, when set, configures the visual arm to embed only those cameras
-    (used with --storage-mode flat_mp4 where the storage has a fixed camera
-    set). Embedding dimension becomes len(cameras) * 256.
+    The visual arm was removed in v1 because its embedding output had no
+    consumer in the categorical pipeline; if v2 brings continuous-space
+    discovery online, that path is its own thing, not a parallel encoder arm.
     """
     import os
     from pipeline.modules.encoder import (
-        CosmosEmbed1Client, CosmosReason2Client, DEFAULT_VOCABULARY, Encoder,
-        StubEmbedClient, StubVLMClient, VisualArm,
+        CosmosReason2Client, DEFAULT_VOCABULARY, Encoder, StubVLMClient,
     )
 
     if stub:
@@ -274,24 +265,9 @@ def _build_encoder(
             )
         vlm = CosmosReason2Client(api_key=api_key)
 
-    # Build the embedding client lazily — only when the visual arm is actually
-    # used. Avoids requiring the Cosmos-Embed1 endpoint (and its kwarg) under
-    # --no-visual reasoning-only runs.
-    if no_visual:
-        visual = None
-    else:
-        embed_client: Any = (
-            StubEmbedClient() if stub
-            else CosmosEmbed1Client(cosmos_url=os.environ.get("COSMOS_EMBED1_URL", ""))
-        )
-        if cameras is not None:
-            visual = VisualArm(client=embed_client, cameras=cameras)
-        else:
-            visual = VisualArm(client=embed_client)
     return Encoder(
         vlm=vlm,
         vocabulary=DEFAULT_VOCABULARY,
-        visual_arm=visual,
         cache_root=Path(cache_root) if cache_root else None,
     )
 
@@ -346,9 +322,9 @@ def _run_analyze(args: argparse.Namespace) -> int:
         if not args.cameras:
             print(
                 "[pipeline.run analyze] --storage-mode flat_mp4 requires "
-                "--cameras (comma-separated, e.g. --cameras FRONT). The customer "
+                "--cameras (comma-separated, e.g. --cameras FRONT). The operator "
                 "must declare which cameras their MP4 bucket contains so the "
-                "visual-arm embedding dimensionality is explicit.",
+                "FlatMP4Storage filename convention is unambiguous.",
                 file=sys.stderr,
             )
             return 2
@@ -357,7 +333,6 @@ def _run_analyze(args: argparse.Namespace) -> int:
             bucket_uri=args.bucket, cameras=cameras, sign_as=args.sign_as,
         )
     else:
-        cameras = None
         storage = WindowStorage(bucket_uri=args.bucket, sign_as=args.sign_as)
 
     try:
@@ -382,9 +357,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
     # --- 2. Encoder ------------------------------------------------------
     try:
-        encoder = _build_encoder(
-            args.stub, args.no_visual, args.cache_root, cameras=cameras,
-        )
+        encoder = _build_encoder(args.stub, args.cache_root)
     except RuntimeError as exc:
         print(f"[pipeline.run analyze] {exc}", file=sys.stderr)
         return 2

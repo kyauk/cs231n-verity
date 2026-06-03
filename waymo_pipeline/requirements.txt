@@ -5,6 +5,7 @@ fastapi
 uvicorn[standard]
 pydantic
 python-dotenv
+python-multipart  # required for the debate test UI's video upload form
 
 # --- pipeline stages ---
 requests

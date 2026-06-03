@@ -89,7 +89,6 @@ def test_analyze_parses_minimal_flags() -> None:
     assert args.output == "/tmp/out"
     assert args.max_workers == 8
     assert args.stub is False
-    assert args.no_visual is False
     assert args.cache_root is None
     assert args.sign_as is None
 

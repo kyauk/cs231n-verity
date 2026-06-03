@@ -40,11 +40,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from waymo_pipeline import store
-from waymo_pipeline.io import PIPELINE_PROGRESS_PREFIX, read_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_ROOT = Path(__file__).resolve().parent
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs" / "waymo"
+PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -72,46 +72,50 @@ app.add_middleware(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file into a list of dict rows; empty list when missing."""
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows
+
+
 def _now_iso() -> str:
+    """Current UTC timestamp in ISO-8601 form."""
     return datetime.now(timezone.utc).isoformat()
-
-
-# Segment index is immutable once written by the video pipeline stage; cache
-# it in memory so repeated calls within a request don't re-read from disk.
-_segment_index_cache: dict[str, dict[str, str]] | None = None
 
 
 def _segment_index() -> dict[str, dict[str, str]]:
     """Load the Waymo segment_index.json (segment_id -> {camera: signed_url}).
 
-    Looks under outputs/waymo/ then the project root.  Result is cached after
-    first successful load.  Returns {} if absent — the runner stays functional
-    before the MP4 stage has been run.
+    Looks under outputs/waymo/ then the project root. Returns {} if absent --
+    the runner stays functional even before the MP4 stage has been run.
     """
-    global _segment_index_cache
-    if _segment_index_cache is not None:
-        return _segment_index_cache
     for candidate in (OUTPUTS_ROOT / "segment_index.json", PROJECT_ROOT / "segment_index.json"):
         if candidate.exists():
             try:
                 data = json.loads(candidate.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    _segment_index_cache = data
-                    return _segment_index_cache
+                    return data
             except (json.JSONDecodeError, OSError):
                 pass
     return {}
 
 
-def _invalidate_segment_index_cache() -> None:
-    """Drop the in-memory segment index cache (call after video pipeline completes)."""
-    global _segment_index_cache
-    _segment_index_cache = None
-
-
 def _video_url_for(log_id: str, camera: str = "FRONT") -> str:
     """Resolve a playable video URL for a segment/camera from the segment index."""
-    cameras = _segment_index().get(log_id, {})
+    index = _segment_index()
+    cameras = index.get(log_id, {})
     return cameras.get(camera) or cameras.get("FRONT") or ""
 
 
@@ -192,10 +196,10 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
     ]
 
     try:
-        for cmd_args, stage_name in stages:
+        for args, stage_name in stages:
             _update(stage=stage_name)
             completed = subprocess.run(
-                cmd_args, cwd=str(PROJECT_ROOT), env=env,
+                args, cwd=str(PROJECT_ROOT), env=env,
                 capture_output=True, text=True, check=False,
             )
             if completed.returncode != 0:
@@ -205,10 +209,8 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
                     completedAt=_now_iso(),
                 )
                 return
-            if stage_name == "mp4":
-                _invalidate_segment_index_cache()
 
-        clusters = read_jsonl(clusters_jsonl)
+        clusters = _read_jsonl(clusters_jsonl)
         _update(
             status="completed",
             stage="done",
@@ -288,7 +290,7 @@ async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
     store.append_list("batches", record)
 
     # Run the pipeline off the request thread so the UI gets an immediate ack.
-    asyncio.get_running_loop().run_in_executor(
+    asyncio.get_event_loop().run_in_executor(
         None, _run_batch_pipeline, batch_id, payload.dataSourceUri, payload.maxSegments
     )
     return JSONResponse({"batch": record}, status_code=201)
@@ -305,7 +307,7 @@ def cluster_space() -> JSONResponse:
     Built from waymo_clusters.jsonl produced by the clustering stage. Each row
     has window_id, cluster_label, glosh_score, and coord_3d.
     """
-    clusters = read_jsonl(OUTPUTS_ROOT / "waymo_clusters.jsonl")
+    clusters = _read_jsonl(OUTPUTS_ROOT / "waymo_clusters.jsonl")
 
     points: list[dict[str, Any]] = []
     per_cluster: dict[int, list[float]] = {}
@@ -350,12 +352,12 @@ def get_scene(scene_id: str) -> JSONResponse:
     when available; otherwise from anomaly scenario tags. The video URL is
     resolved from the Waymo segment index.
     """
-    flagged = read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
+    flagged = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
     flagged_by_window = {r.get("window_id"): r for r in flagged}
     row = flagged_by_window.get(scene_id, {})
     log_id = str(row.get("log_id", scene_id.split("_")[0]))
 
-    descriptions = read_jsonl(OUTPUTS_ROOT / "reasoning" / "description_outputs.jsonl")
+    descriptions = _read_jsonl(OUTPUTS_ROOT / "reasoning" / "description_outputs.jsonl")
     latest_desc = next(
         (d for d in reversed(descriptions) if d.get("window_id") == scene_id), None
     )
@@ -406,28 +408,17 @@ def _risk_to_score(priority_score: float, risk_level: str) -> int:
 @app.get("/scenarios")
 def list_scenarios() -> JSONResponse:
     """Return flagged scenarios assembled from regression-case proposals."""
-    proposals = read_jsonl(OUTPUTS_ROOT / "reasoning" / "proposals.jsonl")
-    flagged = read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
+    proposals = _read_jsonl(OUTPUTS_ROOT / "reasoning" / "proposals.jsonl")
+    flagged = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
     flagged_by_window = {r.get("window_id"): r for r in flagged}
-
-    # Build a run_id -> region lookup from stored batch records.  Each
-    # proposal carries the run_id of the analysis run that produced it; the
-    # batch that produced the underlying embeddings determines the region.
-    # Fall back to "Unknown" if the lineage cannot be resolved so we never
-    # silently assign the wrong region to a proposal.
     batches = store.read("batches", [])
-    # Use the most recently completed batch as a last-resort default only.
-    completed = [b for b in batches if b.get("status") == "completed"]
-    fallback_region = completed[-1]["region"] if completed else "Unknown"
+    default_region = batches[-1]["region"] if batches else "US-West"
 
     scenarios: list[dict[str, Any]] = []
     for proposal in proposals:
         window_id = proposal.get("window_id", "")
         anomaly = flagged_by_window.get(window_id, {})
         risk_level = str(proposal.get("risk_level", "low"))
-        # Proposals carry metadata.dataset but not a direct region; use the
-        # fallback until batch-versioned outputs are wired up.
-        region = proposal.get("region") or fallback_region
         scenarios.append({
             "id": str(proposal.get("case_id", window_id)),
             "scenarioName": str(proposal.get("failure_mode") or "Unnamed Scenario"),
@@ -437,7 +428,7 @@ def list_scenarios() -> JSONResponse:
             ),
             "definingConditions": str(proposal.get("evidence_summary", "")),
             "hasSimulationSpec": proposal.get("decision") == "add_to_suite",
-            "region": region,
+            "region": default_region,
         })
     scenarios.sort(key=lambda s: s["priorityScore"], reverse=True)
     return JSONResponse({"scenarios": scenarios})
@@ -475,7 +466,7 @@ def _ensure_visual_manifest(scene_id: str) -> Path:
     manifest_path = OUTPUTS_ROOT / "flagged_visuals" / "manifest.jsonl"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    flagged = read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
+    flagged = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
     row = next((r for r in flagged if r.get("window_id") == scene_id), {})
     log_id = str(row.get("log_id", scene_id.split("_")[0]))
 
@@ -505,14 +496,10 @@ def _ensure_visual_manifest(scene_id: str) -> Path:
             else:
                 mp4_path = ""
 
-    content = json.dumps({"window_id": scene_id, "grid_path": "", "mp4_path": mp4_path}) + "\n"
-    tmp = manifest_path.with_suffix(".jsonl.tmp")
-    try:
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(manifest_path)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
+    manifest_path.write_text(
+        json.dumps({"window_id": scene_id, "grid_path": "", "mp4_path": mp4_path}) + "\n",
+        encoding="utf-8",
+    )
     return manifest_path
 
 
@@ -573,9 +560,9 @@ async def run_analysis_stream(payload: RunAnalysisRequest) -> StreamingResponse:
             return
 
         # Assemble the final analysis result from the pipeline outputs.
-        debate_rows = read_jsonl(reasoning_dir / "debate_outputs.jsonl")
-        description_rows = read_jsonl(reasoning_dir / "description_outputs.jsonl")
-        proposal_rows = read_jsonl(reasoning_dir / "proposals.jsonl")
+        debate_rows = _read_jsonl(reasoning_dir / "debate_outputs.jsonl")
+        description_rows = _read_jsonl(reasoning_dir / "description_outputs.jsonl")
+        proposal_rows = _read_jsonl(reasoning_dir / "proposals.jsonl")
 
         latest_debate = next(
             (r for r in reversed(debate_rows) if r.get("window_id") == payload.sceneId), None
@@ -592,9 +579,18 @@ async def run_analysis_stream(payload: RunAnalysisRequest) -> StreamingResponse:
             return
 
         debate_history = (latest_debate.get("metadata", {}) or {}).get("debate_history", [])
-        proponent = "\n\n".join(h for h in debate_history if "Proponent" in h)
-        critic = "\n\n".join(h for h in debate_history if "Critic" in h)
+        # The tool-augmented debate uses four actors. Map them onto the
+        # frontend's three-slot view: Scene Analyst + Risk Assessor argue for
+        # inclusion (proposer), the Coverage Analyst is the skeptic (critic),
+        # and the Synthesis Arbiter's raw output is the judge verdict.
+        proponent = "\n\n".join(
+            h for h in debate_history
+            if "[Scene Analyst]" in h or "[Risk Assessor]" in h
+        )
+        critic = "\n\n".join(h for h in debate_history if "[Coverage Analyst]" in h)
         judge = (latest_debate.get("metadata", {}) or {}).get("judge_raw_output", "")
+        if not judge:
+            judge = "\n\n".join(h for h in debate_history if "[Synthesis Arbiter]" in h)
 
         priority_score = _risk_to_score(
             float(latest_debate.get("priority_score", 0.0)),

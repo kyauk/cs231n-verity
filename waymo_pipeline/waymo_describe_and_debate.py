@@ -33,7 +33,6 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from waymo_pipeline.io import emit_progress, read_jsonl, write_jsonl
 from waymo_pipeline.models.handoff_contracts import (
     AnomalyResultRecord,
     DebateInputRecord,
@@ -42,6 +41,40 @@ from waymo_pipeline.models.handoff_contracts import (
     SceneDescriptionInputRecord,
     SceneDescriptionOutputRecord,
 )
+from waymo_pipeline.debate_actors import run_tool_augmented_debate
+from waymo_pipeline.proposal_builder import build_proposal_from_debate_output
+
+PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
+
+
+# ---------------------------------------------------------------------------
+# Progress / IO helpers
+# ---------------------------------------------------------------------------
+
+def _emit_pipeline_progress(step: str, title: str, detail: str = "") -> None:
+    """Emit a structured stdout line consumed by the SSE-streaming runner."""
+    payload = json.dumps({"step": step, "title": title, "detail": detail}, ensure_ascii=False)
+    print(f"{PROGRESS_PREFIX}{payload}", flush=True)
+
+
+def _read_jsonl(path: str) -> list[dict[str, Any]]:
+    """Read a JSONL file into a list of rows."""
+    rows: list[dict[str, Any]] = []
+    if not os.path.isfile(path):
+        return rows
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def _write_jsonl(path: str, rows: list[dict[str, Any]]) -> None:
+    """Write rows to a JSONL output path."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
 
 
 def _load_regression_suite(path: str) -> list[str]:
@@ -51,29 +84,6 @@ def _load_regression_suite(path: str) -> list[str]:
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
     return [str(item) for item in payload] if isinstance(payload, list) else []
-
-
-def _nim_response_text(response: requests.Response, label: str) -> str:
-    """Extract the content string from a NIM chat completion response.
-
-    Raises ``RuntimeError`` with a descriptive message rather than letting
-    KeyError/IndexError propagate when the API returns an unexpected shape
-    (e.g. empty ``choices`` on rate-limit or quota exhaustion).
-    """
-    try:
-        body = response.json()
-        choices = body["choices"]
-        if not choices:
-            raise RuntimeError(
-                f"{label}: NIM returned an empty 'choices' list "
-                f"(status {response.status_code}). Full body: {response.text[:300]}"
-            )
-        return str(choices[0]["message"]["content"]).strip()
-    except (KeyError, IndexError) as exc:
-        raise RuntimeError(
-            f"{label}: unexpected NIM response shape — {exc}. "
-            f"Body: {response.text[:300]}"
-        ) from exc
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,7 +181,7 @@ def _nim_text_chat_completion(messages: list[dict[str, Any]]) -> str:
         raise RuntimeError(
             f"NIM debate call failed: HTTP {response.status_code}: {response.text[:300]}"
         )
-    return _nim_response_text(response, "debate")
+    return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
 def _nim_vlm_describe(video_path: str, anomaly_priors: dict[str, Any]) -> str:
@@ -182,7 +192,7 @@ def _nim_vlm_describe(video_path: str, anomaly_priors: dict[str, Any]) -> str:
     """
     api_key = os.getenv("NVIDIA_API_KEY", "")
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
-    model_id = os.getenv("DESCRIBE_NIM_MODEL_ID", "nvidia/vila")
+    model_id = os.getenv("DESCRIBE_NIM_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl")
     if not api_key:
         raise RuntimeError("NVIDIA_API_KEY missing for description stage.")
 
@@ -224,7 +234,7 @@ def _nim_vlm_describe(video_path: str, anomaly_priors: dict[str, Any]) -> str:
         raise RuntimeError(
             f"NIM VLM describe failed: HTTP {response.status_code}: {response.text[:300]}"
         )
-    return _nim_response_text(response, "describe")
+    return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +334,8 @@ def multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateOutputRe
     suite_text = "\n".join(
         f"{i + 1}. {item}" for i, item in enumerate(record.regression_suite)
     )
-    emit_progress(
-        "debate_round_proponent", "Regression suite debate",
+    _emit_pipeline_progress(
+        "debate", "Regression suite debate",
         f"{rounds} round(s): proponent, critic, then judge verdict via NIM.",
     )
 
@@ -334,8 +344,8 @@ def multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateOutputRe
     latest_critic = "No critic argument yet."
 
     for round_index in range(1, rounds + 1):
-        emit_progress(
-            "debate_round_proponent", f"Debate round {round_index} of {rounds}",
+        _emit_pipeline_progress(
+            "debate_round", f"Debate round {round_index} of {rounds}",
             "Proponent is drafting the regression-suite proposal...",
         )
         latest_proponent = _nim_text_chat_completion([
@@ -356,8 +366,8 @@ def multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateOutputRe
         ])
         history.append(f"Round {round_index} - Proponent: {latest_proponent}")
 
-        emit_progress(
-            "debate_round_critic", f"Debate round {round_index} of {rounds}",
+        _emit_pipeline_progress(
+            "debate_round", f"Debate round {round_index} of {rounds}",
             "Critic is reviewing the proposal...",
         )
         latest_critic = _nim_text_chat_completion([
@@ -374,7 +384,7 @@ def multi_agent_debate(record: DebateInputRecord, rounds: int) -> DebateOutputRe
         ])
         history.append(f"Round {round_index} - Critic: {latest_critic}")
 
-    emit_progress(
+    _emit_pipeline_progress(
         "debate_judge", "Judge verdict",
         "Collecting final JSON decision from the judge model...",
     )
@@ -425,9 +435,13 @@ def build_proposal(debate: DebateOutputRecord, run_id: str) -> RegressionCasePro
     """Assemble a RegressionCaseProposal from a debate output record."""
     metadata = debate.metadata
     history = metadata.get("debate_history", [])
-    risk_level = _severity_from_outlier(
-        float(metadata.get("outlier_score", 0.0)),
-        bool(metadata.get("is_noise", False)),
+    severity_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low"}
+    risk_level = severity_map.get(
+        _severity_from_outlier(
+            float(metadata.get("outlier_score", 0.0)),
+            bool(metadata.get("is_noise", False)),
+        ),
+        "low",
     )
     decision_map = {
         "add_immediately": "add_to_suite",
@@ -450,10 +464,7 @@ def build_proposal(debate: DebateOutputRecord, run_id: str) -> RegressionCasePro
         counterarguments=[h for h in history if "Critic" in h],
         rebuttal_summary=history[-1] if history else "",
         decision=decision_map.get(debate.recommendation, "monitor"),
-        recommended_test_spec=(
-            f"Capability: {metadata.get('capability_tag', 'unspecified')}\n"
-            f"Rationale: {debate.rationale}"
-        ),
+        recommended_test_spec=debate.rationale,
         scenario_variants=[],
         confidence=debate.priority_score,
         uncertainty_factors=[],
@@ -473,74 +484,107 @@ def main() -> int:
     args = parse_args()
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
-    emit_progress("start", "Pipeline started", "Loading anomaly inputs and media paths.")
+    _emit_pipeline_progress("start", "Pipeline started", "Loading anomaly inputs and media paths.")
 
-    anomaly_rows = [AnomalyResultRecord.model_validate(r) for r in read_jsonl(args.flagged_jsonl)]
+    anomaly_rows = [AnomalyResultRecord.model_validate(r) for r in _read_jsonl(args.flagged_jsonl)]
     anomaly_rows = sorted(anomaly_rows, key=lambda r: r.anomaly_rank)[: max(1, args.top_k)]
     if not anomaly_rows:
         print("No anomaly rows selected for description/debate stages.")
         return 1
 
     manifest_by_window: dict[str, dict[str, Any]] = {}
-    for row in read_jsonl(args.visual_manifest_jsonl):
+    for row in _read_jsonl(args.visual_manifest_jsonl):
         manifest_by_window[str(row.get("window_id", ""))] = row
 
     regression_suite = _load_regression_suite(args.regression_suite_json)
     description_inputs = _build_description_inputs(run_id, anomaly_rows, manifest_by_window)
+    backend = os.getenv("COSMOS_DESCRIBE_BACKEND", "nim_vlm").strip().lower()
 
     description_outputs: list[SceneDescriptionOutputRecord] = []
     total = len(description_inputs)
     for idx, record in enumerate(description_inputs, start=1):
-        emit_progress(
-            "describe", "Scene description",
-            f"Window {record.window_id} ({idx}/{total}): analyzing Waymo clip...",
-        )
-        video_ref = next(
-            (m for m in record.media_refs if m.lower().endswith(
-                (".mp4", ".mov", ".mkv", ".avi", ".webm"))),
-            None,
-        )
-        if not video_ref or not os.path.isfile(os.path.abspath(video_ref)):
-            raise RuntimeError(
-                f"No local video file for window {record.window_id}; "
-                f"expected a playable media ref. Got: {record.media_refs}"
+        try:
+            _emit_pipeline_progress(
+                "describe", "Scene description",
+                f"Window {record.window_id} ({idx}/{total}): analyzing Waymo clip...",
             )
-        anomaly_priors = {
-            "window_id": record.window_id,
-            "scene_token_hex": record.scene_token_hex,
-            "log_id": record.log_id,
-            "scenario_tags": record.scenario_tags,
-            "cluster_label": record.cluster_label,
-            "is_noise": record.is_noise,
-            "outlier_score": record.outlier_score,
-            "anomaly_rank": record.anomaly_rank,
-        }
-        raw = _nim_vlm_describe(os.path.abspath(video_ref), anomaly_priors)
-        parsed = _parse_description(raw)
-        description_outputs.append(
-            SceneDescriptionOutputRecord(
-                run_id=record.run_id,
-                window_id=record.window_id,
-                scene_token_hex=record.scene_token_hex,
-                log_id=record.log_id,
-                scene_description=parsed["scene_description"],
-                anomaly_rationale=parsed["anomaly_rationale"],
-                confidence=parsed["confidence"],
-                model_source="nim_vlm",
-                media_refs=record.media_refs,
-                metadata=record.prompt_context,
+            video_ref = next(
+                (m for m in record.media_refs if m.lower().endswith(
+                    (".mp4", ".mov", ".mkv", ".avi", ".webm"))),
+                None,
             )
-        )
+            anomaly_priors = {
+                "window_id": record.window_id,
+                "scene_token_hex": record.scene_token_hex,
+                "log_id": record.log_id,
+                "scenario_tags": record.scenario_tags,
+                "cluster_label": record.cluster_label,
+                "is_noise": record.is_noise,
+                "outlier_score": record.outlier_score,
+                "anomaly_rank": record.anomaly_rank,
+            }
+            if backend == "hf":
+                # Local HF VLM path -- delegate to the reference runner's module
+                # if present in the environment.
+                from pipeline.stage_describe_and_debate import _hf_chat_completion  # type: ignore
 
-    emit_progress(
+                abs_path = os.path.abspath(video_ref) if video_ref else ""
+                raw = _hf_chat_completion(messages=[
+                    {"role": "user", "content": (
+                        [{"type": "video", "video": abs_path, "fps": 8}] if abs_path else []
+                    ) + [{"type": "text", "text": (
+                        "Describe this AV clip. Output strict JSON with keys "
+                        "scene_description, anomaly_rationale, confidence.\n"
+                        + json.dumps(anomaly_priors)
+                    )}]},
+                ])
+            else:
+                if not video_ref or not os.path.isfile(os.path.abspath(video_ref)):
+                    raise RuntimeError(
+                        f"No local video file for window {record.window_id}; "
+                        f"expected media ref. Got: {record.media_refs}"
+                    )
+                raw = _nim_vlm_describe(os.path.abspath(video_ref), anomaly_priors)
+
+            parsed = _parse_description(raw)
+            description_outputs.append(
+                SceneDescriptionOutputRecord(
+                    run_id=record.run_id,
+                    window_id=record.window_id,
+                    scene_token_hex=record.scene_token_hex,
+                    log_id=record.log_id,
+                    scene_description=parsed["scene_description"],
+                    anomaly_rationale=parsed["anomaly_rationale"],
+                    confidence=parsed["confidence"],
+                    model_source="nim_vlm" if backend != "hf" else "hf_vlm",
+                    media_refs=record.media_refs,
+                    metadata=record.prompt_context,
+                )
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"COSMOS_BLOCKED: true during description stage: {error}")
+            return 1
+
+    _emit_pipeline_progress(
         "describe_done", "Scene description complete",
         f"Processed {len(description_outputs)} window(s). Starting debate stage...",
     )
 
     debate_inputs = [build_debate_input(d, regression_suite) for d in description_outputs]
-    debate_outputs = [multi_agent_debate(record, args.debate_rounds) for record in debate_inputs]
+    debate_outputs: list[DebateOutputRecord] = []
+    for record, description in zip(debate_inputs, description_outputs):
+        try:
+            # Tool-augmented four-actor ReAct debate. VLM follow-ups re-query the
+            # clip through the hosted NIM vision API (no local model load).
+            debate_output, _proposal_metadata = run_tool_augmented_debate(
+                record, description.media_refs, rounds=args.debate_rounds
+            )
+            debate_outputs.append(debate_output)
+        except Exception as error:  # noqa: BLE001
+            print(f"COSMOS_BLOCKED: true during debate stage: {error}")
+            return 1
 
-    emit_progress("save", "Saving results", "Writing JSONL outputs and summary.")
+    _emit_pipeline_progress("save", "Saving results", "Writing JSONL outputs and summary.")
     os.makedirs(args.output_dir, exist_ok=True)
     desc_in_path = os.path.join(args.output_dir, "description_inputs.jsonl")
     desc_out_path = os.path.join(args.output_dir, "description_outputs.jsonl")
@@ -548,29 +592,33 @@ def main() -> int:
     debate_out_path = os.path.join(args.output_dir, "debate_outputs.jsonl")
     proposals_path = os.path.join(args.output_dir, "proposals.jsonl")
 
-    write_jsonl(desc_in_path, [r.model_dump() for r in description_inputs])
-    write_jsonl(desc_out_path, [r.model_dump() for r in description_outputs])
-    write_jsonl(debate_in_path, [r.model_dump() for r in debate_inputs])
-    write_jsonl(debate_out_path, [r.model_dump() for r in debate_outputs])
+    _write_jsonl(desc_in_path, [r.model_dump() for r in description_inputs])
+    _write_jsonl(desc_out_path, [r.model_dump() for r in description_outputs])
+    _write_jsonl(debate_in_path, [r.model_dump() for r in debate_inputs])
+    _write_jsonl(debate_out_path, [r.model_dump() for r in debate_outputs])
 
-    proposals = [build_proposal(d, run_id) for d in debate_outputs]
-    write_jsonl(proposals_path, [r.model_dump() for r in proposals])
+    proposals = [build_proposal_from_debate_output(d, run_id) for d in debate_outputs]
+    _write_jsonl(proposals_path, [r.model_dump() for r in proposals])
 
     summary = {
         "run_id": run_id,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "selected_rows": len(anomaly_rows),
+        "cosmos_blocked": False,
         "dataset": "waymo_open_dataset_v_2_0_1",
+        "description_backend": backend,
+        "debate_backend": "nim_text_tool_augmented",
+        "vlm_followup_backend": "nim_vlm_api",
         "debate_model_id": os.getenv("DEBATE_NIM_MODEL_ID", "meta/llama-3.1-8b-instruct"),
         "description_outputs": desc_out_path,
         "debate_outputs": debate_out_path,
         "proposals": proposals_path,
     }
-    summary_path = os.path.join(args.output_dir, "summary.json")
-    with open(summary_path, "w", encoding="utf-8") as handle:
+    with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
 
-    print(f"Saved summary: {summary_path}")
+    print("COSMOS_BLOCKED: false (Waymo description/debate path succeeded).")
+    print(f"Saved summary: {os.path.join(args.output_dir, 'summary.json')}")
     return 0
 
 

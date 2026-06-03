@@ -6,15 +6,15 @@ Bring your fleet data. Verity surfaces what's underrepresented, ranks the highes
 
 ---
 
-## Status (2026-05-30)
+## Status (2026-06-03)
 
-Pipeline is end-to-end runnable. **657 tests passing, full hygiene protocol signed off for every module.**
+Pipeline is end-to-end runnable. **641 tests passing, full hygiene protocol signed off for every module.**
 
 | Component | Status |
 |---|---|
 | Module 1 — Storage (canonical layout + ingestion) | ✅ Complete |
 | Module 1 sibling — `FlatMP4Storage` (skip-ingest path for bare MP4 buckets) | ✅ Complete |
-| Module 2 — Encoder (reasoning + visual arms) | ✅ Complete |
+| Module 2 — Encoder (reasoning arm) | ✅ Complete |
 | Module 3 — Hypothesizer | ✅ Complete |
 | Module 4 — Scorer (with `NIMTextClient` for production) | ✅ Complete |
 | Module 5 — Judge UI (customer-facing rater) | ✅ Complete |
@@ -22,9 +22,22 @@ Pipeline is end-to-end runnable. **657 tests passing, full hygiene protocol sign
 | Module 7 — Dev Dashboard (private operator eval surface) | ✅ Complete |
 | `pipeline.run` CLI (`ingest` / `analyze` / `report`) | ✅ Complete |
 
-Two valid input paths:
+Two valid input paths into `pipeline/`:
 1. **Canonical** — Waymo Parquet or TFRecord → `ingest` → `analyze` → `report` (full windowing + pose).
 2. **Flat MP4** — bucket of bare MP4 files → `analyze --storage-mode flat_mp4` (no ingest, one window per MP4).
+
+## Repo Architecture — two coexisting backends, lego-block isolated
+
+This repo ships **two independent discovery backends**. Each is a self-contained Python package; neither imports from the other. They can run side by side on different ports against the same source data, and they're scored against each other in the Dev Dashboard's discrimination test.
+
+| Backend | What it does | Discovery substrate | Entry point |
+|---|---|---|---|
+| **`pipeline/`** (Verity v1) | Compositional symbolic discovery. VLM annotates each window into categorical fields; Hypothesizer finds combinations that are statistically underrepresented; Scorer ranks them; Judge UI / Dev Dashboard collect human ratings. The work this README otherwise documents. | Categorical atom space (locked vocabulary) | `python -m pipeline.run {ingest,analyze,report}` + `uvicorn pipeline.modules.judge_ui.server:app` + `uvicorn pipeline.modules.dev_dashboard.server:app` |
+| **`waymo_pipeline/`** | Embedding-based clustering + 4-actor ReAct debate. Cosmos-Embed1 → UMAP/HDBSCAN clusters → cluster-anchored proposals → multi-agent debate (Risk advocate, Coverage advocate, Evidence agent, Judge) produces verdicts on each proposal. Predates `pipeline/`; lives alongside as the "discovery loop, classical version." | Continuous embedding space + agent reasoning | `uvicorn waymo_pipeline.waymo_runner:app --port 8000` (drives the legacy Ingest / Cluster Space / Analysis / Dashboard tabs in the frontend) |
+
+The lego boundary between them is mechanical: `grep "from pipeline\|from waymo_pipeline" {pipeline,waymo_pipeline}/ -rn` returns zero cross-imports. Replace either side without touching the other.
+
+Eventually one wins (or they merge into a single representation, per `ARCHITECTURE_PROPOSAL.md` §4 v2). For now they coexist and the dev_dashboard discrimination test is the harness that tells you which is producing better-rated discoveries.
 
 ---
 
@@ -107,7 +120,7 @@ Or if you're running on a VM, set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/servi
 docker compose --profile gpu up -d
 ```
 
-This pulls and starts Cosmos-Embed1 (port 8080) and Cosmos-Reason2 (port 8081). One-time pull is ~15 min; after that, containers come up in seconds. Update `.env` to point both clients at local:
+This pulls and starts Cosmos-Reason2 (port 8081). One-time pull is ~15 min; after that, the container comes up in seconds. Update `.env` to point both encoder + scorer at the local endpoint:
 
 ```bash
 NVIDIA_BASE_URL=http://localhost:8081/v1
@@ -159,7 +172,7 @@ python -m pipeline.run analyze \
   --output outputs/session-1
 ```
 
-Typical runtime: ~30 seconds per window (hosted NIM), ~5 seconds on a local A100. Useful flags: `--stub` (offline / CI), `--no-visual` (skip the embedding arm), `--max-workers N` (concurrency), `--sign-as <sa-email>` (see signing options below).
+Typical runtime: ~30 seconds per window (hosted NIM), ~5 seconds on a local A100. Useful flags: `--stub` (offline / CI), `--max-workers N` (concurrency), `--sign-as <sa-email>` (see signing options below).
 
 Outputs: `schema_records.json`, `proposals.json`, `scored.json` in the `--output` directory.
 
@@ -255,7 +268,7 @@ python -m pipeline.run analyze \
   --output outputs/full
 ```
 
-**`--cameras` is required in flat mode** — you must declare which cameras your MP4s contain so the visual-arm embedding dimensionality is explicit. Filename convention is decided by your camera count:
+**`--cameras` is required in flat mode** — you must declare which cameras your MP4s contain so the FlatMP4Storage filename convention is unambiguous. Filename convention is decided by your camera count:
 
 | `--cameras` count | Filename pattern | Example |
 |---|---|---|

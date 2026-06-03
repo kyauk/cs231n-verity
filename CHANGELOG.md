@@ -1,5 +1,91 @@
 # Verity — CHANGELOG
 
+## 2026-06-03 — `waymo_pipeline/` pulled from main; `*_outdated/` dirs deleted
+
+Brought the embedding-based clustering + 4-actor ReAct debate backend from
+`origin/main` into the working tree as a coexisting (lego-isolated) second
+discovery loop alongside `pipeline/`. The integration the user wanted —
+"link the waymo_pipeline → debate to make it a seamless transaction" —
+was already done on main (commit `b5707c1`, "Reimplement the full 4-actor
+ReAct debate for the new integrated workflow app"), so the pull brings the
+wire pre-built via `waymo_pipeline/proposal_builder.py`.
+
+**Pulled from `origin/main`:**
+- `waymo_pipeline/` (21 files) — clustering pipeline (Cosmos-Embed1 → UMAP/HDBSCAN)
+  + 4-actor ReAct debate (`actor_tools.py`, `debate_actors.py`, `debate_scoring.py`,
+  `proposal_builder.py`, `react_loop.py`, `debate_test_server.py`,
+  `waymo_describe_and_debate.py`) + FastAPI runner (`waymo_runner.py`, port 8000) +
+  the supporting cluster / embed / extract / populate / video utilities.
+
+**Not pulled (deliberate):**
+- Main's `pipeline/` — local is 7 commits ahead (visual arm removal + bug-fix batch + Module 7).
+- Main's `frontend/` — local has the dev_dashboard tabs main doesn't.
+- Main's `relevant_video_debate_files/` — same file count both sides; the only meaningful main-side delta (commit `161e18d`, GPU OOM fix) targets the OLD debate location, superseded by the integrated version in `waymo_pipeline/`.
+
+**Lego boundary verified:**
+```
+grep "from pipeline\|from waymo_pipeline" {pipeline,waymo_pipeline}/ -rn → 0 results
+```
+No cross-imports either direction. The two backends are mechanically independent.
+
+**Cleanup (lego tidying):**
+- Deleted `waymo_pipeline_outdated/` (16 files, superseded by the fresh pull from main, imported by nothing).
+- Deleted `pipeline_outdated/` (16 files, superseded by `pipeline/` long ago, imported by nothing).
+- Top-level tree dropped from 11 dirs to 9: now `Perturbation/`, `cache/`, `docs/`, `frontend/`, `kb/`, `outputs/`, `pipeline/`, `relevant_video_debate_files/`, `waymo_pipeline/`. Each directory is a distinct lego brick with one clear purpose.
+
+**Dependencies:**
+- `waymo_pipeline/requirements.txt` retained for standalone-install use.
+- Top-level `requirements.txt` updated to include the union (adds `gcsfs`, `google-auth`, `pandas`, `pyarrow`, `python-multipart`, `tqdm`, upgrades `uvicorn` → `uvicorn[standard]`) so a single project-root `pip install -r requirements.txt` gives you everything both backends need.
+- Grouped + commented in the top-level requirements file for review-friendliness.
+
+**Architecture note added to root README** explaining how `pipeline/` (symbolic, v1) and `waymo_pipeline/` (embedding + debate) coexist, what each does, what entry points drive what tabs, and what the lego boundary means in practice. The Dev Dashboard's discrimination test is the harness for "which is producing better-rated discoveries."
+
+**Tests:** 641 passing in `pipeline/`, 2 skipped. No tests authored for `waymo_pipeline/` in this pull — they live with that backend's own work. Smoke-verified that 6 key `waymo_pipeline` modules import cleanly (proposal_builder, react_loop, debate_actors, debate_scoring, actor_tools, waymo_describe_and_debate).
+
+---
+
+## 2026-06-03 — Visual arm removed (Module 2 contract narrowed)
+
+The Encoder's visual arm (Cosmos-Embed1 → 1280-d embedding per window) was
+removed because its output had no consumer in the categorical pipeline:
+the Hypothesizer reads `fields` (atoms), but the visual arm produced an
+embedding vector with no atom-emitting classifier downstream. The original
+"reasoning vs visual" A/B framing in the architecture spec required that
+classifier and we never built it, so the visual arm was carrying its own
+weight in VRAM (~14 GB for Cosmos-Embed1) for no measurable signal.
+
+If v2 brings continuous-space discovery online per `ARCHITECTURE_PROPOSAL.md` §4,
+embeddings come back as a parallel discovery channel — not as a parallel
+encoder arm. The infrastructure overlap with the deleted code is meaningful
+(Cosmos-Embed1 client, embed JSON shape, NIM container config) but the
+default-on-during-analyze framing was wrong for v1.
+
+**Deleted:**
+- `pipeline/modules/encoder/visual_arm.py` (~250 LoC: `VisualArm`, `EmbedClient`, `CosmosEmbed1Client`, `StubEmbedClient`, `EmbedUnavailableError`)
+- `pipeline/modules/encoder/tests/test_visual_arm.py`
+- `docker-compose.yml` `cosmos-embed1` service block + `:gpu` profile mention
+- `.env.example` `COSMOS_EMBED1_URL` variable
+- 3 tests in `pipeline/tests/run/test_run_analyze_flat_mp4.py` that asserted `cameras` threaded into VisualArm
+
+**Updated:**
+- `pipeline/modules/encoder/__init__.py` — removed `VisualArm`/`EmbedClient`/`CosmosEmbed1Client`/`StubEmbedClient` from public surface and `__all__`
+- `pipeline/modules/encoder/encoder.py` — removed `visual_arm` constructor param, `_process_visual_arm`, `_annotate_visual`, `_visual_failure_record`, `_visual_cache_key`, `_visual_cache_dir`; `process()` now always returns length-1 list (shape preserved for v2)
+- `pipeline/run.py` — removed `--no-visual` CLI flag; `_build_encoder(stub, cache_root)` signature simplified; `--cameras` now documents the FlatMP4Storage filename convention (its original purpose) rather than visual-arm dimensionality
+- 6 test files: `Namespace` fixtures no longer carry `no_visual`; `_build_encoder` calls updated; `Encoder(...)` constructions dropped `visual_arm=None` kwarg
+- README + pipeline/README — visual-arm mentions removed from setup, contract sections, and overview diagram; `SchemaRecord.arm` documented as always-`"reasoning"` in v1
+- `pipeline/modules/scorer/tests/test_plausibility.py::test_contains_frequency_info` — pre-existing stranded test from FIRST_RUN_FINDINGS Issue 5 fix, now inverted into a regression test (`test_does_not_leak_rarity_statistics`) that asserts the rarity-leak language is NOT present
+
+**Kept (deliberately):**
+- The `arm: str` field on `SchemaRecord`, `CompositionProposal`, and `Rating`. Removing it would cascade through Modules 3–7 and break dev_dashboard's reuse of the field for source-pool labels (`"verity"` / `"random"` / `"naive_rare"`). Documented as v1-always-`"reasoning"`.
+- Per-arm dict structure in `EvaluationReport` and Hypothesizer arm filtering. Degenerates naturally to single-arm.
+- The cosmos-reason2 service in docker-compose.yml (still required for the reasoning arm).
+
+**Tests:** 641 passing, 2 skipped. (Was 657 before the surgery; net change: -16 visual-arm tests deleted, -3 dead VisualArm-threading tests, +1 plausibility regression test inverted from the stranded one, others updated in place.)
+
+**If v2 needs this back:** start from the git history of `pipeline/modules/encoder/visual_arm.py` (the EmbedClient protocol + Cosmos-Embed1 client implementation are independently useful for a continuous-discovery channel). The cosmos-embed1 docker service is in the git history of `docker-compose.yml`.
+
+---
+
 ## 2026-05-30 — Module 7: Dev Dashboard v1.0
 
 Private operator-facing evaluation surface for project self-evaluation

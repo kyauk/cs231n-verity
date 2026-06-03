@@ -60,7 +60,6 @@ def test_encoder_consumes_flat_mp4_storage_end_to_end(tmp_path) -> None:
         vlm=StubVLMClient(),
         vocabulary=DEFAULT_VOCABULARY,
         cache_root=tmp_path,
-        visual_arm=None,
     )
 
     inputs = [
@@ -94,7 +93,6 @@ def test_encoder_reads_pose_summary_from_synthesized_manifest(tmp_path) -> None:
         vlm=StubVLMClient(),
         vocabulary=DEFAULT_VOCABULARY,
         cache_root=tmp_path,
-        visual_arm=None,
     )
     inp = WindowInput(segment_id="seg_000", window_idx=0, storage=storage)
     rec = encoder.process(inp)[0]
@@ -110,7 +108,6 @@ def test_record_round_trips_through_interfaces(tmp_path) -> None:
         vlm=StubVLMClient(),
         vocabulary=DEFAULT_VOCABULARY,
         cache_root=tmp_path,
-        visual_arm=None,
     )
     rec = encoder.process(
         WindowInput(segment_id="seg_000", window_idx=0, storage=storage)
