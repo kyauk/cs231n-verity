@@ -1,0 +1,132 @@
+Clustering windows under gs://nvidia-adr-waymo-segment-videos/verity (FRONT).
+Swapping GPU reason1 -> embed1 (reason1 restored on exit)...
+[gpu] draining
+[gpu] swapping_to_embed
+[gpu] embed_ready
+embed1 ready -> running pipeline.run cluster ...
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+[pipeline.run cluster] found 114 windows
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10203656353524179475_7625_000_7645_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10203656353524179475_7625_000_7645_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10203656353524179475_7625_000_7645_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1024360143612057520_3580_000_3600_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1024360143612057520_3580_000_3600_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1024360143612057520_3580_000_3600_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10247954040621004675_2180_000_2200_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10247954040621004675_2180_000_2200_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10247954040621004675_2180_000_2200_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10289507859301986274_4200_000_4220_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10289507859301986274_4200_000_4220_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10289507859301986274_4200_000_4220_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10335539493577748957_1372_870_1392_870/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10335539493577748957_1372_870_1392_870/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10335539493577748957_1372_870_1392_870/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10359308928573410754_720_000_740_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10359308928573410754_720_000_740_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10359308928573410754_720_000_740_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10448102132863604198_472_000_492_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10448102132863604198_472_000_492_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10448102132863604198_472_000_492_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10689101165701914459_2072_300_2092_300/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10689101165701914459_2072_300_2092_300/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10689101165701914459_2072_300_2092_300/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1071392229495085036_1844_790_1864_790/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1071392229495085036_1844_790_1864_790/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1071392229495085036_1844_790_1864_790/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10837554759555844344_6525_000_6545_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10837554759555844344_6525_000_6545_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10837554759555844344_6525_000_6545_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10868756386479184868_3000_000_3020_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10868756386479184868_3000_000_3020_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/10868756386479184868_3000_000_3020_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11037651371539287009_77_670_97_670/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11037651371539287009_77_670_97_670/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11037651371539287009_77_670_97_670/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11048712972908676520_545_000_565_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11048712972908676520_545_000_565_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11048712972908676520_545_000_565_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1105338229944737854_1280_000_1300_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1105338229944737854_1280_000_1300_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1105338229944737854_1280_000_1300_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11356601648124485814_409_000_429_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11356601648124485814_409_000_429_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11356601648124485814_409_000_429_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11387395026864348975_3820_000_3840_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11387395026864348975_3820_000_3840_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11387395026864348975_3820_000_3840_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11406166561185637285_1753_750_1773_750/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11406166561185637285_1753_750_1773_750/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11406166561185637285_1753_750_1773_750/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11434627589960744626_4829_660_4849_660/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11434627589960744626_4829_660_4849_660/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11434627589960744626_4829_660_4849_660/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11450298750351730790_1431_750_1451_750/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11450298750351730790_1431_750_1451_750/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11450298750351730790_1431_750_1451_750/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11616035176233595745_3548_820_3568_820/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11616035176233595745_3548_820_3568_820/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11616035176233595745_3548_820_3568_820/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11660186733224028707_420_000_440_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11660186733224028707_420_000_440_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11660186733224028707_420_000_440_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11901761444769610243_556_000_576_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11901761444769610243_556_000_576_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/11901761444769610243_556_000_576_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12102100359426069856_3931_470_3951_470/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12102100359426069856_3931_470_3951_470/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12102100359426069856_3931_470_3951_470/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12134738431513647889_3118_000_3138_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12134738431513647889_3118_000_3138_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12134738431513647889_3118_000_3138_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12306251798468767010_560_000_580_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12306251798468767010_560_000_580_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12306251798468767010_560_000_580_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12358364923781697038_2232_990_2252_990/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12358364923781697038_2232_990_2252_990/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12358364923781697038_2232_990_2252_990/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12374656037744638388_1412_711_1432_711/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12374656037744638388_1412_711_1432_711/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12374656037744638388_1412_711_1432_711/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12496433400137459534_120_000_140_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12496433400137459534_120_000_140_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12496433400137459534_120_000_140_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12657584952502228282_3940_000_3960_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12657584952502228282_3940_000_3960_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12657584952502228282_3940_000_3960_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12820461091157089924_5202_916_5222_916/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12820461091157089924_5202_916_5222_916/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12820461091157089924_5202_916_5222_916/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12831741023324393102_2673_230_2693_230/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12831741023324393102_2673_230_2693_230/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12831741023324393102_2673_230_2693_230/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12866817684252793621_480_000_500_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12866817684252793621_480_000_500_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12866817684252793621_480_000_500_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12940710315541930162_2660_000_2680_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12940710315541930162_2660_000_2680_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/12940710315541930162_2660_000_2680_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13178092897340078601_5118_604_5138_604/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13178092897340078601_5118_604_5138_604/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13178092897340078601_5118_604_5138_604/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13184115878756336167_1354_000_1374_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13184115878756336167_1354_000_1374_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13184115878756336167_1354_000_1374_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13299463771883949918_4240_000_4260_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13299463771883949918_4240_000_4260_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13299463771883949918_4240_000_4260_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1331771191699435763_440_000_460_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1331771191699435763_440_000_460_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/1331771191699435763_440_000_460_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13336883034283882790_7100_000_7120_000/0000/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13336883034283882790_7100_000_7120_000/0001/camera_FRONT.mp4 (in-process ADC fetch).
+[Storage/Client] v4 signing unavailable (AttributeError); returning gs:// URI for verity/windows/13336883034283882790_7100_000_7120_000/0002/camera_FRONT.mp4 (in-process ADC fetch).
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/umap/umap_.py:1952: UserWarning: n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.
+  warn(
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/umap/umap_.py:1952: UserWarning: n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.
+  warn(
+[Clustering] 114 windows -> 5 clusters, 0 noise.
+[pipeline.run cluster] DONE — 5 clusters, 0 noise over 114 windows. Output: /home/ubuntu/NVIDIA-ADR-1/outputs/waymo/sessions/inject_demo/clusters.json
+[gpu] swapping_to_reason
+[gpu] reason_ready
+DONE -> /home/ubuntu/NVIDIA-ADR-1/outputs/waymo/clusters.json and /home/ubuntu/NVIDIA-ADR-1/outputs/waymo/flagged_windows.jsonl

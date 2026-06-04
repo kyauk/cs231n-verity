@@ -151,25 +151,12 @@ function SceneModal({ scene, loading, open, onClose, onAnalyze }: {
               </>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Environment</h4>
-              <div className="space-y-1.5">
-                {(['weather', 'timeOfDay', 'roadType'] as const).map(k => (
-                  <div key={k} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground capitalize">{k === 'timeOfDay' ? 'Time of Day' : k === 'roadType' ? 'Road Type' : 'Weather'}</span>
-                    <span className="font-medium">{scene?.annotations[k] ?? '—'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Events</h4>
-              <div className="flex flex-wrap gap-1">
-                {(scene?.annotations.events ?? []).map(ev => (
-                  <Badge key={ev} variant="outline" className="text-xs">{ev}</Badge>
-                ))}
-              </div>
+          <div>
+            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Events</h4>
+            <div className="flex flex-wrap gap-1">
+              {(scene?.annotations.events ?? []).map(ev => (
+                <Badge key={ev} variant="outline" className="text-xs">{ev}</Badge>
+              ))}
             </div>
           </div>
           <Button className="w-full" onClick={onAnalyze} disabled={loading || !scene}>

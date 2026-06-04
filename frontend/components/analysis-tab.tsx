@@ -286,19 +286,7 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
                 <h3 className="font-medium text-foreground">Selected Scene</h3>
                 <Badge variant="outline" className="font-mono text-xs">{scene.id}</Badge>
               </div>
-              <div className="grid grid-cols-4 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Weather: </span>
-                  <span className="font-medium">{scene.annotations.weather}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Time: </span>
-                  <span className="font-medium">{scene.annotations.timeOfDay}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Road: </span>
-                  <span className="font-medium">{scene.annotations.roadType}</span>
-                </div>
+              <div className="grid grid-cols-1 gap-4 text-sm">
                 <div>
                   <span className="text-muted-foreground">Events: </span>
                   <span className="font-medium">{scene.annotations.events.length}</span>

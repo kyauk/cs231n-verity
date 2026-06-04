@@ -17,6 +17,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from typing import Any
 
 from pipeline.modules.debate.config import DebateModelUnavailableError
@@ -130,6 +133,52 @@ def _fetch_clip_bytes(video_ref: str, timeout: float) -> tuple[bytes, str]:
         return handle.read(), mime
 
 
+def _downscale_video_for_budget(raw: bytes) -> bytes:
+    """Re-encode a clip so the NIM can both ACCEPT and DECODE it on one GPU.
+
+    Two distinct limits bite on a full ~20s Waymo segment (1920x1280, ~79
+    frames sampled at ~4fps):
+
+      1. Pixel budget — Cosmos-Reason1 rejects (HTTP 400) any request whose
+         decoded pixels exceed ``VLLM_MAX_TOTAL_VIDEO_PIXELS`` (104M here).
+      2. Decoder memory — the VLM holds every decoded frame in device memory
+         alongside the 7B weights, so too many frames OOMs NVDEC mid-decode
+         (``cuvidMapVideoFrame ... error 2``).
+
+    So we cut BOTH resolution (``VLM_CLIP_MAX_WIDTH``, default 1024) AND frame
+    rate (``VLM_CLIP_FPS``, default 2 -> ~40 frames over 20s, ~28M px). Disable
+    B-frames + force yuv420p for maximum NVDEC compatibility. Whole clip
+    duration is preserved; only resolution + temporal density drop. Best-effort:
+    if ffmpeg is missing or fails, return the original bytes unchanged.
+    """
+    max_width = int(os.environ.get("VLM_CLIP_MAX_WIDTH", "1024"))
+    fps = float(os.environ.get("VLM_CLIP_FPS", "2"))
+    if max_width <= 0 or shutil.which("ffmpeg") is None:
+        return raw
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "in.mp4")
+            dst = os.path.join(td, "out.mp4")
+            with open(src, "wb") as f:
+                f.write(raw)
+            # fps first (fewer frames -> less decoder memory), then scale
+            # (never upscale, keep aspect, even height).
+            vf = f"fps={fps},scale='min({max_width},iw)':-2"
+            proc = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", src,
+                 "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast",
+                 "-crf", "30", "-bf", "0", "-pix_fmt", "yuv420p", dst],
+                capture_output=True, text=True,
+            )
+            if proc.returncode != 0 or not os.path.exists(dst):
+                return raw
+            with open(dst, "rb") as f:
+                out = f.read()
+            return out or raw
+    except Exception:  # noqa: BLE001 — never let media prep break the VLM call
+        return raw
+
+
 class NIMVLMClient:
     """VLM describe/follow-up via the NIM OpenAI-compatible chat API.
 
@@ -189,6 +238,8 @@ class NIMVLMClient:
         """Build an OpenAI-style media content block from a clip reference."""
 
         raw, mime = _fetch_clip_bytes(video_ref, self._timeout)
+        if mime.startswith("video/"):
+            raw = _downscale_video_for_budget(raw)
         b64 = base64.b64encode(raw).decode()
         data_uri = f"data:{mime};base64,{b64}"
         if mime.startswith("image/"):

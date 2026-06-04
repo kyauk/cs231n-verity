@@ -30,45 +30,19 @@ from pathlib import Path
 from pipeline.interfaces.taxonomy import EMPTY_TAXONOMY
 from pipeline.modules.curator import CuratorConfig, TaxonomyStore, canonicalize, project
 from pipeline.modules.extractor import CosmosReasonClient
-from scenario_synth import synthesize_scenario
+from pipeline.modules.selection import (
+    SelectionConfig, behavior_novelty, combined_score, score_difficulty, synthesize_scenario,
+)
 
 OUT = Path("outputs/waymo")
 STORE = OUT / "taxonomy_store_salience"
 BUCKET = "gs://nvidia-adr-waymo-segment-videos"
 CFG = CuratorConfig(cohesion_threshold=0.36, merge_threshold=0.20, support_threshold=2)
-BEHAVIOR_AXES = {"interactions", "conditions", "ego_maneuver"}   # NOT agents (granular)
-W_DIFF, W_NOV = 0.7, 0.3
-
-_DIFF_PROMPT = (
-    "You are an AV safety analyst. On a scale of 0.0 to 1.0, how operationally "
-    "DIFFICULT is this clip for an automated driver? 0.0-0.2 routine; 0.3-0.6 "
-    "moderate (normal crossing, moderate traffic, reduced visibility from rain/fog/"
-    "night/wet road); 0.7-1.0 genuinely hard (occluded or suddenly-emerging road "
-    "user, conflict / near-miss, ambiguous right-of-way). Most clips are routine — "
-    'be honest. Answer ONLY: {"difficulty": <0..1>, "reason": "<one short reason>"}'
-)
-_DESC_PROMPT = (
-    "Write a COMPLETE, vivid scene specification for an AV simulator — detailed "
-    "enough to RECREATE this scene: road type and lane layout, intersections/"
-    "signals, weather, lighting, time of day, surrounding setting, and every notable "
-    "agent (vehicles, pedestrians, cyclists) with position, motion, and intent. "
-    "End with one sentence on what is operationally notable. 5-8 concrete sentences; "
-    "describe only what is visible."
-)
+SEL = SelectionConfig()   # weights + novelty_axes (interactions/conditions/ego_maneuver)
 
 
 def _ref(sid: str) -> str:
     return f"{BUCKET}/segments/{sid}/{sid}_FRONT.mp4"
-
-
-def _difficulty(reason: CosmosReasonClient, ref: str) -> tuple[float, str]:
-    try:
-        raw = reason.describe(ref, _DIFF_PROMPT)
-        m = re.search(r"\{[\s\S]*\}", raw)
-        obj = json.loads(m.group(0)) if m else {}
-        return max(0.0, min(1.0, float(obj.get("difficulty", 0.0)))), str(obj.get("reason", "")).strip()
-    except Exception as exc:  # noqa: BLE001
-        return -1.0, f"difficulty check failed: {exc}"
 
 
 def main() -> None:
@@ -97,27 +71,15 @@ def main() -> None:
         atoms = set()
         for x in dd:
             lid = asg.get(x.descriptor_id)
-            if lid and x.axis in BEHAVIOR_AXES:
+            if lid and x.axis in SEL.novelty_axes:
                 atoms.add(name[lid])
         behav[sc] = atoms
 
-    # behavior-novelty: rarity of a scene's behavior atoms across the corpus
-    atom_scene_count = defaultdict(int)
-    for sc, atoms in behav.items():
-        for a in atoms:
-            atom_scene_count[a] += 1
-    N = len(scenes)
-    def raw_nov(sc):
-        atoms = behav[sc]
-        if not atoms:
-            return 0.0
-        return sum(-math.log(atom_scene_count[a] / N) for a in atoms) / len(atoms)
-    raws = {sc: raw_nov(sc) for sc in scenes}
-    lo, hi = min(raws.values()), max(raws.values())
-    nov = {sc: ((raws[sc] - lo) / (hi - lo) if hi > lo else 0.0) for sc in scenes}
+    # behavior-novelty over the dynamic axes (selection module, pure)
+    nov = behavior_novelty(behav)
 
     # cheap pre-rank (salience proxy for difficulty + behavior novelty) -> candidates
-    prelim = sorted(scenes, key=lambda s: -(W_DIFF * maxsal[s] + W_NOV * nov[s]))
+    prelim = sorted(scenes, key=lambda s: -combined_score(maxsal[s], nov[s], SEL))
     cands = prelim[: args.candidates]
     print(f"[hn] VLM-verifying top {len(cands)} candidates (difficulty + description)...", file=sys.stderr)
 
@@ -126,14 +88,14 @@ def main() -> None:
     reason = CosmosReasonClient(max_tokens=700)
     info = {}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        fd = {pool.submit(_difficulty, reason, _ref(s)): s for s in cands}
+        fd = {pool.submit(score_difficulty, reason, _ref(s)): s for s in cands}
         for f in as_completed(fd):
             s = fd[f]; diff, why = f.result(); info.setdefault(s, {})["diff"] = diff; info[s]["why"] = why
 
-    # final rank: difficulty (real) heavy + behavior novelty
+    # final rank: difficulty (real) heavy + behavior novelty (selection module)
     def final(s):
         d = info.get(s, {}).get("diff", 0.0); d = d if d >= 0 else maxsal[s]
-        return W_DIFF * d + W_NOV * nov[s]
+        return combined_score(d, nov[s], SEL)
     ranked = sorted(cands, key=lambda s: -final(s))[: args.topk]
 
     # SYNTHESIZE a novel, generatable scenario from each ranked scene's COMPOSITION

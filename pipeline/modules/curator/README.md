@@ -2,8 +2,9 @@
 
 Turns immutable scene **evidence** into a versioned, self-refining **taxonomy** of
 labels, then projects evidence onto a version to produce the **atoms** the
-Hypothesizer reasons over. The locality rule (repetition → label) and the typed
-axes (entity boundaries) are the idea; this module makes them *honest*.
+discovery stages (Selection, Hypothesizer) reason over. The locality rule
+(repetition → label) and the typed axes (entity boundaries) are the idea; this
+module makes them deterministic, auditable, and recoverable.
 
 ## The three objects (never conflate them)
 

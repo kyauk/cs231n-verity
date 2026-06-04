@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterator
 
 import requests
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # runner -> modules -> pipeline -> repo root
 
 # ---- config (override via env) --------------------------------------------
 # compose service names (docker-compose.yml) and their host ports.

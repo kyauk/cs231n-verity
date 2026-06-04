@@ -45,7 +45,7 @@ _SCENARIO_PROMPT = (
 def _synth(evidence: list[dict]) -> str:
     """Synthesize a NOVEL generatable scenario from the scene's salient atoms +
     grounding spans — not a re-watch of the clip."""
-    from scenario_synth import synthesize_scenario  # noqa: PLC0415
+    from pipeline.modules.selection import synthesize_scenario  # noqa: PLC0415
     atoms = [f"{e.get('axis', 'scene')}:{e['text']}" for e in evidence]
     grounding = [e.get("span", "") for e in sorted(evidence, key=lambda x: -x.get("salience", 0))[:4]]
     return synthesize_scenario(atoms, grounding)

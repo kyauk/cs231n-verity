@@ -312,6 +312,9 @@ class TestExport:
 # ---------------------------------------------------------------------------
 
 class TestVideoUrl:
-    def test_503_when_no_bucket_configured(self, client: TestClient) -> None:
+    def test_falls_back_to_segment_proxy_when_no_bucket(self, client: TestClient) -> None:
+        # With no WindowStorage configured, video-url falls back to the raw-segment
+        # proxy route (/judge/segment-video) rather than returning 503.
         resp = client.get("/judge/video-url?segment_id=seg001&window_idx=2&camera=FRONT")
-        assert resp.status_code == 503
+        assert resp.status_code == 200
+        assert resp.json()["url"] == "/judge/segment-video/seg001?camera=FRONT"

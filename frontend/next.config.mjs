@@ -5,7 +5,10 @@
 // deployment via env. Single-origin design: the browser only ever talks to the
 // Next.js origin, which proxies to the right backend. So a customer forwards /
 // exposes ONE port (3000) and never has to know these services exist.
-const API_ORIGIN = process.env.VERITY_API_ORIGIN ?? 'http://localhost:8000'   // waymo_runner: ingest/cluster/analysis
+// NOTE: the old waymo_runner (:8000) backed the Ingest / Cluster Space / Analysis
+// tabs and has been removed. Those proxy rules are only wired in when a backend is
+// supplied via VERITY_API_ORIGIN; until then those tabs have no backend.
+const API_ORIGIN = process.env.VERITY_API_ORIGIN ?? null
 const JUDGE_ORIGIN = process.env.VERITY_JUDGE_ORIGIN ?? 'http://localhost:8001' // judge_ui
 const DEV_ORIGIN = process.env.VERITY_DEV_ORIGIN ?? 'http://localhost:8002'     // dev_dashboard (gated)
 
@@ -18,16 +21,19 @@ const nextConfig = {
   },
   async rewrites() {
     return [
-      // --- :8000 waymo_runner (Ingest / Cluster Space / Analysis tabs) ---
-      { source: '/probe-path', destination: `${API_ORIGIN}/probe-path` },
-      { source: '/batches', destination: `${API_ORIGIN}/batches` },
-      { source: '/batches/:path*', destination: `${API_ORIGIN}/batches/:path*` },
-      { source: '/cluster-space', destination: `${API_ORIGIN}/cluster-space` },
-      { source: '/scenarios', destination: `${API_ORIGIN}/scenarios` },
-      { source: '/scenes/:path*', destination: `${API_ORIGIN}/scenes/:path*` },
-      { source: '/video/:path*', destination: `${API_ORIGIN}/video/:path*` },
-      { source: '/segment-video/:path*', destination: `${API_ORIGIN}/segment-video/:path*` },
-      { source: '/analysis/:path*', destination: `${API_ORIGIN}/analysis/:path*` },
+      // --- :8000 ingest/cluster/analysis backend (removed waymo_runner) ---
+      // Only wired in when VERITY_API_ORIGIN is set; the old runner is gone.
+      ...(API_ORIGIN ? [
+        { source: '/probe-path', destination: `${API_ORIGIN}/probe-path` },
+        { source: '/batches', destination: `${API_ORIGIN}/batches` },
+        { source: '/batches/:path*', destination: `${API_ORIGIN}/batches/:path*` },
+        { source: '/cluster-space', destination: `${API_ORIGIN}/cluster-space` },
+        { source: '/scenarios', destination: `${API_ORIGIN}/scenarios` },
+        { source: '/scenes/:path*', destination: `${API_ORIGIN}/scenes/:path*` },
+        { source: '/video/:path*', destination: `${API_ORIGIN}/video/:path*` },
+        { source: '/segment-video/:path*', destination: `${API_ORIGIN}/segment-video/:path*` },
+        { source: '/analysis/:path*', destination: `${API_ORIGIN}/analysis/:path*` },
+      ] : []),
       // --- :8001 judge_ui (Judge tab) ---
       { source: '/judge/:path*', destination: `${JUDGE_ORIGIN}/judge/:path*` },
       // --- :8002 dev_dashboard (Dev tabs — only reachable when that service is up) ---

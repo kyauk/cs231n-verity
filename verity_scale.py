@@ -30,7 +30,7 @@ import gcsfs
 import pyarrow.parquet as pq
 from google.cloud import storage
 
-from waymo_pipeline.waymo_video_pipeline import decode_jpeg, encode_mp4_ffmpeg
+from pipeline.modules.storage.media import decode_jpeg, encode_mp4_ffmpeg
 from pipeline.interfaces.taxonomy import EMPTY_TAXONOMY
 from pipeline.modules.curator import (
     CuratorConfig, TaxonomyStore, canonicalize, coverage, project,

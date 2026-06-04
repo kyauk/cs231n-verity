@@ -269,15 +269,17 @@ def test_get_window_video_url_accepts_healthy_mp4() -> None:
     assert url == "https://signed"
 
 
-def test_get_window_video_url_signing_failure_propagates_with_guidance() -> None:
+def test_get_window_video_url_signing_failure_falls_back_to_gs_uri() -> None:
+    # When v4 signing fails (e.g. ADC has no private key), fall back to a gs://
+    # URI rather than raising — callers fetch it in-process via ADC.
     s = FlatMP4Storage(bucket_uri="gs://b/p", cameras=["FRONT"])
     fake_blob = _fake_blob("p/drive_001.mp4", exists=True)
     fake_blob.generate_signed_url.side_effect = RuntimeError("no private key")
     fake_bucket = MagicMock()
     fake_bucket.blob.return_value = fake_blob
     with patch.object(s, "_get_bucket", return_value=fake_bucket):
-        with pytest.raises(WindowStorageError, match="Signed URL generation failed"):
-            s.get_window_video_url("drive_001", 0, camera="FRONT")
+        url = s.get_window_video_url("drive_001", 0, camera="FRONT")
+    assert url == "gs://b/p/drive_001.mp4"
 
 
 # ---------------------------------------------------------------------------
