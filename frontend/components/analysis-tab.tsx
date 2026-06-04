@@ -29,13 +29,15 @@ interface AnalysisTabProps {
   scene: Scene | null
 }
 
-// Maps a pipeline progress `step` (from waymo_pipeline/io.py ProgressStep)
-// to the agent panel index.  Using exact step names keeps the mapping
-// unambiguous — no prefix matching that breaks on renames.
-function stepToAgentIndex(step: string): number {
-  if (step === 'debate_judge') return 2
-  if (step === 'debate_round_proponent') return 0
-  if (step === 'debate_round_critic') return 1
+// Map a progress event to one of the three agent panels by keyword. The
+// backend has multiple debate implementations (proponent/critic/judge AND the
+// tool-augmented Scene Analyst / Coverage Analyst / Synthesis Arbiter), so match
+// on the step+title text rather than exact step names that drift between them.
+function progressToAgentIndex(step: string, title: string): number {
+  const t = `${step} ${title}`.toLowerCase()
+  if (t.includes('judge') || t.includes('arbiter') || t.includes('synthesis') || t.includes('verdict')) return 2
+  if (t.includes('critic') || t.includes('coverage') || t.includes('risk')) return 1
+  if (t.includes('proponent') || t.includes('analyst') || t.includes('describ')) return 0
   return -1
 }
 
@@ -54,6 +56,7 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
   ])
   const [conclusion, setConclusion] = useState<AnalysisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [liveStatus, setLiveStatus] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<AnalysisHistoryEntry[]>([])
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null)
@@ -74,17 +77,23 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
     setIsRunning(true)
     setConclusion(null)
     setErrorMessage(null)
+    setLiveStatus('Starting analysis…')
     setSteps(resetSteps())
 
     try {
       const result = await runAnalysisStream(scene.id, (progress) => {
-        // Route each progress event to the correct agent panel by step name.
-        const agentIdx = stepToAgentIndex(progress.step)
+        // Always surface the latest activity so it's obvious work is happening.
+        setLiveStatus(
+          progress.detail ? `${progress.title} — ${progress.detail}` : progress.title,
+        )
+        // Light up the matching agent panel; mark earlier ones complete.
+        const agentIdx = progressToAgentIndex(progress.step, progress.title)
         if (agentIdx < 0) return
         setSteps(prev =>
           prev.map((s, idx) => {
-            if (idx !== agentIdx) return s
-            return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
+            if (idx < agentIdx && s.status !== 'complete') return { ...s, status: 'complete' }
+            if (idx === agentIdx) return { ...s, status: 'running', output: `${s.output}${progress.detail}\n` }
+            return s
           }),
         )
       })
@@ -122,6 +131,7 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
       setSteps(resetSteps())
     } finally {
       setIsRunning(false)
+      setLiveStatus(null)
     }
   }
 
@@ -163,6 +173,31 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
 
   return (
     <div className="flex flex-col gap-6 p-6 h-full overflow-auto">
+      {/* Error — pinned to the top so it's seen immediately */}
+      {errorMessage && (
+        <Card className="sticky top-0 z-10 border-destructive/30 bg-destructive/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2 text-destructive">
+              <MessageSquareWarning className="w-5 h-5" />
+              Analysis Failed
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">{errorMessage}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Live status — shows the current step so it's clear the agents are working */}
+      {isRunning && liveStatus && (
+        <Card className="sticky top-0 z-10 border-primary/30 bg-primary/5">
+          <CardContent className="py-3 flex items-center gap-3">
+            <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
+            <p className="text-sm text-foreground truncate">{liveStatus}</p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -337,21 +372,6 @@ export function AnalysisTab({ scene }: AnalysisTabProps) {
           )
         })}
       </div>
-
-      {/* Error */}
-      {errorMessage && (
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-medium flex items-center gap-2 text-destructive">
-              <MessageSquareWarning className="w-5 h-5" />
-              Analysis Failed
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{errorMessage}</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Conclusion */}
       {conclusion && (

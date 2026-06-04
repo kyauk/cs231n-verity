@@ -97,9 +97,14 @@ export default function Home() {
     label: string,
     region: string,
     maxSegments: number,
+    mode: 'cluster' | 'reason' | 'both',
   ) => {
     // Let errors propagate — IngestTab catches and displays them inline.
-    await launchBatch(dataSourceUri, label, region, maxSegments)
+    const created = await launchBatch(dataSourceUri, label, region, maxSegments, mode)
+    // Show the new batch immediately rather than waiting on the refetch, which
+    // can momentarily lag the just-written record. loadBatchJobs then reconciles,
+    // and the running-state poll (below) picks up subsequent status changes.
+    setBatchJobs((prev) => [created, ...prev.filter((b) => b.id !== created.id)])
     await loadBatchJobs()
   }
 
@@ -213,7 +218,7 @@ export default function Home() {
             />
           </TabsContent>
 
-          <TabsContent value="analysis" className="h-full m-0 data-[state=inactive]:hidden">
+          <TabsContent value="analysis" forceMount className="h-full m-0 data-[state=inactive]:hidden">
             <AnalysisTab
               scene={analysisScene}
             />

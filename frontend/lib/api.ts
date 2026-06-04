@@ -78,11 +78,12 @@ export async function launchBatch(
   label: string,
   region: string,
   maxSegments: number = 5,
+  mode: 'cluster' | 'reason' | 'both' = 'both',
 ): Promise<BatchJob> {
   const response = await fetch(`${API_BASE_URL}/batches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataSourceUri, label, region, maxSegments }),
+    body: JSON.stringify({ dataSourceUri, label, region, maxSegments, mode }),
   })
   const data = await parseResponse<{ batch: BatchJob }>(response)
   return data.batch

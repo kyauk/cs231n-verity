@@ -154,8 +154,21 @@ class Clusterer:
     # ------------------------------------------------------------------
 
     def run(self, windows: list[Any], storage: Any) -> ClusterReport:
-        """Embed all windows then cluster. The module's one-call entry point."""
-        return self.cluster(self.embed_windows(windows, storage))
+        """Embed all windows then cluster. The module's one-call entry point.
+
+        Skipping a *few* bad windows is fine (handled in embed_windows). But if
+        windows were provided and **none** embedded, that's a systemic embed
+        failure (endpoint down / wrong URL) — raise rather than return a vacuous
+        empty report that downstream would mistake for success.
+        """
+        embeddings = self.embed_windows(windows, storage)
+        if windows and not embeddings:
+            raise EmbedUnavailableError(
+                f"embedded 0 of {len(windows)} windows — the embed endpoint is "
+                f"unreachable or misconfigured (check COSMOS_EMBED1_URL / the "
+                f"Cosmos-Embed NIM). Not emitting an empty cluster report."
+            )
+        return self.cluster(embeddings)
 
 
 def _l2_normalize(vec: list[float]) -> list[float]:

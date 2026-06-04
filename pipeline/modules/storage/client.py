@@ -240,11 +240,17 @@ class WindowStorage:
                 version="v4", expiration=expiration, method="GET",
             )
         except Exception as exc:
-            raise WindowStorageError(
-                blob_name,
-                f"Signed URL generation failed: {exc}. "
-                f"Ensure the service account has roles/iam.serviceAccountTokenCreator.",
-            ) from exc
+            # ADC user creds cannot sign v4 URLs (no private key). In-process
+            # consumers (the clustering embed client downloads the clip itself)
+            # can fetch a gs:// URI via ADC, so fall back to that rather than
+            # failing. External fetchers (browser playback, hosted NIM) still
+            # need a signer — configure sign_as / an SA key for those.
+            print(
+                f"[Storage/Client] v4 signing unavailable ({type(exc).__name__}); "
+                f"returning gs:// URI for {blob_name} (in-process ADC fetch).",
+                file=sys.stderr,
+            )
+            return f"gs://{self._bucket_name}/{blob_name}"
 
     def get_window_pose(self, segment_id: str, window_idx: int) -> PoseData:
         """Return the pose data for a specific window.

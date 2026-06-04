@@ -52,7 +52,12 @@ from pipeline.modules.judge_ui import config
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
-    _load_proposals()
+    # Tolerate a missing proposals file at startup — an analyze batch may not have
+    # run yet. The mtime hot-reload picks it up the moment it appears.
+    try:
+        _load_proposals()
+    except RuntimeError as exc:
+        print(f"[JudgeUI] starting with no proposals yet: {exc}")
     _init_storage()
     yield
 
@@ -79,8 +84,24 @@ _accepted_ids: list[str] = []
 # WindowStorage instance (lazy-initialized when bucket URI is set)
 _storage: Any = None
 
+# mtime of the proposals file when last loaded — used to hot-reload when a new
+# analyze batch overwrites it, so fresh results show without a server restart.
+_proposals_mtime: float = 0.0
+
+
+def _maybe_reload_proposals() -> None:
+    """Reload proposals if the source file changed since the last load."""
+    path = config.JUDGE_PROPOSALS_PATH
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return
+    if mtime != _proposals_mtime:
+        _load_proposals()
+
 
 def _load_proposals() -> None:
+    global _proposals_mtime
     path = config.JUDGE_PROPOSALS_PATH
     if not path.exists():
         raise RuntimeError(
@@ -88,6 +109,14 @@ def _load_proposals() -> None:
             "Generate it by running Module 4 (Scorer) or provide a fixture file.\n"
             f"Override path with JUDGE_PROPOSALS_PATH env var."
         )
+
+    # Reset so a reload replaces (not appends to) the previous set.
+    _proposals.clear()
+    _accepted_ids.clear()
+    try:
+        _proposals_mtime = path.stat().st_mtime
+    except OSError:
+        _proposals_mtime = 0.0
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
@@ -317,6 +346,7 @@ def _load_all_ratings() -> list[Rating]:
 @app.get("/judge/proposals", response_model=list[ProposalRow])
 def list_proposals() -> list[ProposalRow]:
     """Return all accepted proposals in rank order, arm blinded."""
+    _maybe_reload_proposals()  # pick up a fresh analyze batch without a restart
     return [_blind_row(_proposals[pid]) for pid in _accepted_ids]
 
 

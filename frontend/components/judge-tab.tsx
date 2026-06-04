@@ -352,7 +352,7 @@ export function JudgeTab() {
               <Label htmlFor="rater-id">Rater ID</Label>
               <Input
                 id="rater-id"
-                placeholder="e.g. alice"
+                placeholder="e.g. Jason"
                 value={raterInput}
                 onChange={(e) => setRaterInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleStartSession() }}

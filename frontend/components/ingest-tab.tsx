@@ -25,11 +25,19 @@ import {
 import type { BatchJob } from '@/lib/types'
 import { probePath } from '@/lib/api'
 
+type BatchMode = 'cluster' | 'reason' | 'both'
+
 interface IngestTabProps {
   batchJobs: BatchJob[]
-  onLaunchBatch: (dataSourceUri: string, label: string, region: string, maxSegments: number) => Promise<void>
+  onLaunchBatch: (dataSourceUri: string, label: string, region: string, maxSegments: number, mode: BatchMode) => Promise<void>
   onViewClusterSpace: (batchId: string) => void
 }
+
+const BATCH_MODES: { value: BatchMode; label: string; detail: string }[] = [
+  { value: 'cluster', label: 'Cluster & Analyze', detail: 'Embed + cluster the windows (Embed1 / Cluster Space).' },
+  { value: 'reason', label: 'Generate Novel Scenarios', detail: 'Discovery → Judge proposals (Reason1).' },
+  { value: 'both', label: 'Both', detail: 'Cluster first, then auto-swap the GPU to reasoning.' },
+]
 
 const REGIONS = [
   { value: 'US-West', label: 'US West (Phoenix, SF, LA)' },
@@ -64,6 +72,7 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   const [logsJob, setLogsJob] = useState<BatchJob | null>(null)
   const [segmentCount, setSegmentCount] = useState<number | null>(null)
   const [maxSegments, setMaxSegments] = useState<number | 'all'>(5)
+  const [mode, setMode] = useState<BatchMode>('both')
 
   const isValidGcsUri = (uri: string) => /^gs:\/\/[^/]+\/.+/.test(uri.trim())
   const canLaunch = isValidGcsUri(dataSourceUri) && batchLabel.trim() !== '' && region !== '' && !launching && !probing && !pathError
@@ -102,7 +111,7 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
     setLaunching(true)
     setPathError(null)
     try {
-      await onLaunchBatch(dataSourceUri, batchLabel, region, maxSegments === 'all' ? 0 : maxSegments)
+      await onLaunchBatch(dataSourceUri, batchLabel, region, maxSegments === 'all' ? 0 : maxSegments, mode)
       setDataSourceUri('')
       setBatchLabel('')
       setRegion('')
@@ -152,13 +161,13 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   }
 
   const formatSceneCount = (job: BatchJob) => {
-    if (job.status === 'running') {
-      return `${job.scenesProcessed.toLocaleString()}...`
-    }
+    const n = (job.scenesProcessed ?? 0).toLocaleString()
+    // The "Running" status badge already conveys in-progress; don't append "..."
+    // (it made a 0 render as "0..." / a running 100 as "100...").
     if (job.status === 'failed') {
-      return `${job.scenesProcessed.toLocaleString()} / ${job.totalScenes?.toLocaleString() ?? '?'}`
+      return `${n} / ${job.totalScenes?.toLocaleString() ?? '?'}`
     }
-    return job.scenesProcessed.toLocaleString()
+    return n
   }
 
   return (
@@ -341,6 +350,28 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                 )}
               </div>
             )}
+
+            {/* Pipeline mode — the GPU runs one model at a time, so 'Both' is sequential */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Pipeline</Label>
+              <div className="grid sm:grid-cols-3 gap-2">
+                {BATCH_MODES.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setMode(m.value)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      mode === m.value
+                        ? 'border-primary bg-primary/10'
+                        : 'border-muted-foreground/20 hover:border-primary/50'
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-foreground">{m.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{m.detail}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Launch Button */}
             <Button

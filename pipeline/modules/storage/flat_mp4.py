@@ -234,11 +234,18 @@ class FlatMP4Storage:
                 version="v4", expiration=expiration, method="GET",
             )
         except Exception as exc:
-            raise WindowStorageError(
-                blob_name,
-                f"Signed URL generation failed: {exc}. "
-                f"See README → 'GCS signed URLs' for the three working setups.",
-            ) from exc
+            # ADC user creds cannot sign v4 URLs (no private key). In-process
+            # consumers (the clustering embed client downloads the clip itself)
+            # can fetch a gs:// URI via ADC, so fall back to that rather than
+            # failing the batch. External fetchers (browser playback, hosted
+            # NIM) still need a signer — configure sign_as / an SA key for those.
+            import sys  # noqa: PLC0415
+            print(
+                f"[FlatMP4Storage] v4 signing unavailable ({type(exc).__name__}); "
+                f"returning gs:// URI for {blob_name} (in-process ADC fetch).",
+                file=sys.stderr,
+            )
+            return f"gs://{self._bucket_name}/{blob_name}"
 
     def get_window_manifest(
         self, segment_id: str, window_idx: int

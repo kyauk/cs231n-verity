@@ -161,3 +161,13 @@ The directory can't be deleted wholesale yet: it still hosts the `:8000` API (In
 5. **Debate / Analysis** (`debate_actors`, `react_loop`, `proposal_builder`, `waymo_describe_and_debate`, `waymo_populate_pgvector`, `debate_*`) — out of scope now; later becomes its own module the same way. Until then `waymo_runner.py` + `store.py` stay.
 
 **Net:** the algorithmic merge (the hard, design-bearing part) is done and lego-clean; what remains is mechanical repointing + one model-dependent verification, all instance-agnostic except the embed run itself.
+
+### Progress update (2026-06-04, later) — HTTP layer de-duplicated
+- ✅ **Phase 1 (unify ingest) + Phase 2 (repoint `:8000` batch):** `waymo_runner._run_batch_pipeline` now runs **`pipeline.run ingest`** (canonical Module 1) + **`pipeline.run cluster`** (Module 8) instead of its 4 bespoke scripts — *no separate ingestion universe*. **Verified:** a 2-segment batch ingested into the canonical `verity/windows/{seg}/` layout (the same windows Judge reads).
+- ✅ **Ingestion is an isolated checkpoint:** `ingested=True` persists even when the cluster stage fails (verified live).
+- ✅ **Per-subprocess credentials:** ingest = user ADC (reads Waymo source); cluster = signer key (reads output + signs).
+- ✅ **Honest failure:** all-embeds-failed now raises (`embedded 0/N windows…`) → batch `failed` with a clear reason, instead of a hollow `completed` empty report. Locked by a unit test.
+- ✅ **Phase 3 (`/cluster-space`)** reads the module's `clusters.json` (`ClusterReport`).
+- ⏳ **Script deletion blocked:** `smoke_test.py` still invokes `waymo_cluster_embeddings`, and `waymo_extract_scene_windows`/`scene_window.py` import `waymo_video_pipeline`. Repoint `smoke_test.py` → `pipeline.run cluster`, then delete the 4 deprecated scripts.
+- ⏳ **Judge-as-batch-selectable:** the batch currently runs ingest→cluster; wiring "Run Judge on this batch" (`pipeline.run analyze` → `scored.json` → judge_ui) is the remaining "pick judge **or** cluster" piece.
+- ⏳ **Real embeddings:** fix `COSMOS_EMBED1_URL` (it points at `:8000`, the API, not an embed NIM) + a running embed NIM (`embed1` here or Cosmos-3 unified).

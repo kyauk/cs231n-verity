@@ -158,9 +158,35 @@ class CosmosReason2Client:
             timeout=self._timeout,
         )
 
+    def _resolve_video_url(self, video_url: str) -> str:
+        """Return a URL the NIM can ingest.
+
+        A local NIM cannot fetch a gs:// URI (and user-ADC can't sign one), so
+        when storage hands back gs:// (its no-signing fallback), download the clip
+        in-process via ADC and inline it as a base64 data URI. https/data URLs
+        pass through unchanged.
+        """
+        if not video_url.startswith("gs://"):
+            return video_url
+        import base64  # noqa: PLC0415
+        from google.cloud import storage  # noqa: PLC0415
+        no_scheme = video_url[len("gs://"):]
+        bucket_name, _, blob_name = no_scheme.partition("/")
+        project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        if not project:
+            try:
+                import google.auth  # noqa: PLC0415
+                creds, project = google.auth.default()
+                project = project or getattr(creds, "quota_project_id", None)
+            except Exception:  # noqa: BLE001
+                project = None
+        data = storage.Client(project=project).bucket(bucket_name).blob(blob_name).download_as_bytes()
+        return "data:video/mp4;base64," + base64.b64encode(data).decode()
+
     def complete(self, video_url: str, prompt: str) -> str:
         """Send a video URL + text prompt to Cosmos-Reason2. Return raw text."""
         client = self._get_client()
+        video_ref = self._resolve_video_url(video_url)
         try:
             response = client.chat.completions.create(
                 model=self.model_id,
@@ -170,7 +196,7 @@ class CosmosReason2Client:
                         "content": [
                             {
                                 "type": "video_url",
-                                "video_url": {"url": video_url},
+                                "video_url": {"url": video_ref},
                             },
                             {
                                 "type": "text",

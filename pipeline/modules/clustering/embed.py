@@ -38,15 +38,38 @@ class NIMEmbedClient:
         self.model_id = model_id or os.environ.get("COSMOS_EMBED1_MODEL_ID", _DEFAULT_MODEL)
         self._timeout = timeout_seconds
 
+    def _fetch_clip(self, video_url: str) -> bytes:
+        """Fetch the clip bytes. Handles https(signed) URLs and gs:// URIs.
+
+        gs:// is returned by storage when ADC cannot sign a v4 URL; since this
+        client runs in-process, it can download the object directly via ADC.
+        """
+        if video_url.startswith("gs://"):
+            from google.cloud import storage  # noqa: PLC0415
+            no_scheme = video_url[len("gs://"):]
+            bucket_name, _, blob_name = no_scheme.partition("/")
+            project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            if not project:
+                try:
+                    import google.auth  # noqa: PLC0415
+                    creds, project = google.auth.default()
+                    project = project or getattr(creds, "quota_project_id", None)
+                except Exception:  # noqa: BLE001
+                    project = None
+            client = storage.Client(project=project)
+            return client.bucket(bucket_name).blob(blob_name).download_as_bytes()
+        import requests  # noqa: PLC0415
+        clip = requests.get(video_url, timeout=self._timeout)
+        clip.raise_for_status()
+        return clip.content
+
     def embed(self, video_url: str) -> list[float]:
         try:
             import requests  # noqa: PLC0415
         except ImportError as exc:  # pragma: no cover
             raise EmbedUnavailableError(f"missing dependency: {exc}") from exc
         try:
-            clip = requests.get(video_url, timeout=self._timeout)
-            clip.raise_for_status()
-            b64 = base64.b64encode(clip.content).decode()
+            b64 = base64.b64encode(self._fetch_clip(video_url)).decode()
             payload = {
                 "input": [f"data:video/mp4;base64,{b64}"],
                 "request_type": "query",

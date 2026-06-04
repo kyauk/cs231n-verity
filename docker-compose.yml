@@ -40,6 +40,8 @@ services:
       NGC_API_KEY: ${NGC_API_KEY}
     ports:
       - "8080:8000"
+    # NIM/Triton workers crash on init without enough shared memory.
+    shm_size: "16gb"
     deploy:
       resources:
         reservations:

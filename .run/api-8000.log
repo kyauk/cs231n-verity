@@ -1,4 +1,4 @@
-INFO:     Started server process [59293]
+INFO:     Started server process [125840]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
@@ -9,50 +9,222 @@ INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 Could not determine bucket type for bucket name x: 400 Invalid storage layout name. Storage layout name should be a valid bucket resource name followed by '/storageLayout'. [reason: "INVALID_STORAGE_LAYOUT_NAME"
 domain: "storage.googleapis.com"
 ], falling back to GCSFileSystem
-INFO:     127.0.0.1:39588 - "GET /probe-path?uri=gs://x HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45178 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55028 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55030 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55044 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41036 - "GET /probe-path?uri=gs%3A%2F%2Fwaymo_open_dataset_v_2_0_1%2Fvalidation%2Fcamera_image HTTP/1.1" 200 OK
-INFO:     127.0.0.1:35250 - "POST /batches HTTP/1.1" 201 Created
-INFO:     127.0.0.1:35266 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40436 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40438 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40440 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40452 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40464 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40458 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52090 - "GET /probe-path?uri=gs%3A%2F%2Fwaymo_open_dataset_v_2_0_1%2Fvalidation%2Fcamera_image HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52092 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52094 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52102 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52118 - "POST /batches HTTP/1.1" 201 Created
-INFO:     127.0.0.1:52124 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45612 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45596 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45626 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45638 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45654 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45668 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58412 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58404 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58426 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58440 - "GET /v1/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:58444 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58460 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58472 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47000 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47014 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47022 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47032 - "GET /v1/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:47036 - "GET /cluster-space HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47046 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47050 - "GET /scenarios HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51562 - "GET /batches HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51576 - "GET /batches HTTP/1.1" 200 OK
-Could not determine bucket type for bucket name x: 400 Invalid storage layout name. Storage layout name should be a valid bucket resource name followed by '/storageLayout'. [reason: "INVALID_STORAGE_LAYOUT_NAME"
-domain: "storage.googleapis.com"
-], falling back to GCSFileSystem
-INFO:     127.0.0.1:50922 - "GET /probe-path?uri=gs%3A%2F%2Fx HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50932 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "GET /probe-path?uri=gs://x HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54548 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60102 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60088 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60118 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57460 - "POST /batches HTTP/1.1" 201 Created
+INFO:     127.0.0.1:57472 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57486 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57488 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57492 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57502 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57510 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57518 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57534 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57546 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57550 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57558 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57572 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57586 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57588 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57598 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57604 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57608 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57620 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57632 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49706 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49716 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49730 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49736 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49738 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49754 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49764 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49772 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49788 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49798 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49808 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49824 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49828 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49838 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49850 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49866 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49880 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49882 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49898 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49910 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49912 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49918 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49926 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49928 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49930 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49934 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49940 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49956 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49968 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49980 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49988 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49994 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50010 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50020 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50024 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49858 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49864 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49872 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49884 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49886 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49890 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49892 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49908 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49914 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49922 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49932 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49944 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49958 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49972 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49984 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49996 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49986 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50004 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52054 - "POST /batches HTTP/1.1" 201 Created
+INFO:     127.0.0.1:52060 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52068 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52070 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52072 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52074 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52076 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52090 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52106 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52108 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52112 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52120 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52122 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46726 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46728 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46730 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46740 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46752 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46768 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46780 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46792 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46802 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46808 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46810 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46816 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46832 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46836 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46852 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46868 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46884 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46890 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46902 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46918 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46920 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46922 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46930 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46936 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46952 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46962 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46976 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52330 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52338 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52350 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52366 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52380 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52386 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52400 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52402 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52414 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49752 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49766 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49768 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49774 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48790 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48780 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48788 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58940 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49514 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49524 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39582 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39588 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39604 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39610 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38128 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38122 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38142 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50714 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50716 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50720 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51332 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34528 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58488 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45548 - "GET /probe-path?uri=gs://waymo_open_dataset_v_2_0_1/validation/camera_image HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46192 - "POST /batches HTTP/1.1" 201 Created
+INFO:     127.0.0.1:46206 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46208 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46212 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46226 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46232 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:46244 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36906 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36912 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36914 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36928 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36932 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36934 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36936 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36938 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36952 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36962 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36966 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36978 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36986 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36996 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:37008 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:37016 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:37026 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:37038 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:37044 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43538 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43552 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43560 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43570 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43572 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43578 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43588 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43592 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43600 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43606 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43610 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43624 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43634 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43644 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43650 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43656 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43672 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43674 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43676 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43678 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60698 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60712 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60718 - "POST /v1/embeddings HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60726 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43566 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57204 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53690 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33330 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50398 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42030 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54368 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57416 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58034 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58044 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48742 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53378 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33456 - "GET /batches HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [125840]

@@ -384,8 +384,13 @@ def _run_cluster(args: argparse.Namespace) -> int:
     print(f"[pipeline.run cluster] found {len(windows)} windows", file=sys.stderr)
 
     # --- 2. Clustering (Module 8) ----------------------------------------
+    from pipeline.modules.clustering import ClusteringError
     clusterer = _build_clusterer(args.stub, cameras)
-    report = clusterer.run(windows, storage)
+    try:
+        report = clusterer.run(windows, storage)
+    except ClusteringError as exc:
+        print(f"[pipeline.run cluster] clustering failed: {exc}", file=sys.stderr)
+        return 2
 
     import json
     out = output_dir / "clusters.json"

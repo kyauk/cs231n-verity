@@ -34,17 +34,24 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from waymo_pipeline import store
+from waymo_pipeline.gpu_arbiter import GpuBusyError, gpu
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_ROOT = Path(__file__).resolve().parent
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs" / "waymo"
 PIPELINE_PROGRESS_PREFIX = "PIPELINE_PROGRESS:"
+
+# The browser reaches /video through the single Next.js origin (which proxies to
+# this runner), so the URL must be RELATIVE — never an absolute host, which would
+# break under port-forwarding. Override only for an out-of-band deployment.
+_VIDEO_API_BASE = os.environ.get("VERITY_PUBLIC_API_URL", "").rstrip("/")
+_VIDEO_BUCKET_URI = os.environ.get("VERITY_BUCKET", "gs://nvidia-adr-waymo-segment-videos/verity")
 
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
@@ -119,6 +126,56 @@ def _video_url_for(log_id: str, camera: str = "FRONT") -> str:
     return cameras.get(camera) or cameras.get("FRONT") or ""
 
 
+_STATS_CACHE: dict[str, dict[str, str]] = {}
+_WAYMO_SOURCE_BUCKET = os.environ.get("WAYMO_SOURCE_BUCKET", "waymo_open_dataset_v_2_0_1")
+
+
+def _waymo_stats(segment_id: str) -> dict[str, str]:
+    """Weather / time-of-day / location from the Waymo `stats` component (GT).
+
+    These are dataset ground-truth labels — no reasoning model needed. Cached
+    per segment; returns {} if the stats parquet can't be read.
+    """
+    if segment_id in _STATS_CACHE:
+        return _STATS_CACHE[segment_id]
+    result: dict[str, str] = {}
+    try:
+        import io  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+        import pyarrow.parquet as pq  # noqa: PLC0415
+        from google.cloud import storage  # noqa: PLC0415
+
+        project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        client = storage.Client(project=project)
+        for split in ("validation", "training", "testing"):
+            blob = client.bucket(_WAYMO_SOURCE_BUCKET).blob(f"{split}/stats/{segment_id}.parquet")
+            if not blob.exists():
+                continue
+            df = pq.read_table(io.BytesIO(blob.download_as_bytes())).to_pandas()
+
+            def _first(col: str) -> str:
+                if col not in df.columns:
+                    return ""
+                vals = df[col].dropna()
+                return str(vals.iloc[0]) if len(vals) else ""
+
+            weather = _first("[StatsComponent].weather")
+            tod = _first("[StatsComponent].time_of_day")
+            loc = _first("[StatsComponent].location")
+            if weather:
+                result["weather"] = weather.title()           # "sunny" -> "Sunny"
+            if tod:
+                result["timeOfDay"] = tod                      # "Day" / "Night" / ...
+            if loc:
+                result["location"] = loc.replace("location_", "").upper()  # phx -> PHX
+            break
+    except Exception as exc:  # noqa: BLE001
+        import sys  # noqa: PLC0415
+        print(f"[runner] Waymo stats lookup failed for {segment_id}: {exc}", file=sys.stderr)
+    _STATS_CACHE[segment_id] = result
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -127,6 +184,16 @@ def _video_url_for(log_id: str, camera: str = "FRONT") -> str:
 def health() -> dict[str, str]:
     """Lightweight health probe for the frontend connectivity check."""
     return {"status": "ok", "dataset": "waymo"}
+
+
+@app.get("/gpu")
+def gpu_status() -> JSONResponse:
+    """Current L40S arbiter state.
+
+    reason1 and embed1 share one GPU and cannot co-run. The frontend uses this
+    to show GPU status and disable Analyze while an ingest batch is embedding.
+    """
+    return JSONResponse(gpu.status())
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +207,11 @@ class LaunchBatchRequest(BaseModel):
     label: str
     region: str
     maxSegments: int = 5
+    # Which stages to run on the single GPU:
+    #   "cluster" -> ingest + embed/cluster (Embed1)
+    #   "reason"  -> ingest + discovery analyze -> Judge proposals (Reason1)
+    #   "both"    -> ingest + cluster, then auto-swap to Reason1 and analyze
+    mode: str = "both"
 
 
 @app.get("/batches")
@@ -150,11 +222,38 @@ def list_batches() -> JSONResponse:
     return JSONResponse({"batches": batches_sorted})
 
 
-def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) -> None:
-    """Run extraction + embedding + clustering for one batch (background task).
+def _list_segment_ids(data_source_uri: str, n: int) -> list[str]:
+    """List up to `n` segment IDs (parquet stems) under the source URI. n<=0 = all."""
+    import gcsfs  # noqa: PLC0415
+    fs = gcsfs.GCSFileSystem(token="google_default")
+    path = data_source_uri.removeprefix("gs://").rstrip("/")
+    ids: list[str] = []
+    for f in fs.ls(path):
+        name = str(f).split("/")[-1]
+        if name.endswith(".parquet"):
+            ids.append(name[: -len(".parquet")])
+        if n and len(ids) >= n:
+            break
+    return ids
 
-    Updates the batch record's status/progress as stages complete. On any
-    failure the batch is marked ``failed`` so the UI reflects it.
+
+def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int,
+                        mode: str = "both") -> None:
+    """Ingest, then run the GPU stage(s) selected by `mode`.
+
+    mode == "cluster": ingest + embed/cluster (Embed1).
+    mode == "reason":  ingest + discovery analyze -> Judge proposals (Reason1).
+    mode == "both":    ingest + cluster, then the embed window closes (GPU auto-
+                       swaps back to Reason1) and analyze runs — no manual swap.
+
+    Ingest (shared Module 1) then cluster (Module 8) via the unified
+    `pipeline.run` composition root — no separate waymo ingestion universe.
+
+    Ingestion is an isolated checkpoint: if clustering fails (e.g. the embed NIM
+    is down) the ingested windows persist and the batch is still usable by the
+    Judge path. Per-subprocess credentials: ingest reads the Waymo SOURCE bucket
+    with user ADC; cluster reads the OUTPUT bucket + signs URLs with the signer
+    key (a user token can't sign; the signer SA can't read the public source).
     """
     def _update(**fields: Any) -> None:
         batches = store.read("batches", [])
@@ -163,61 +262,98 @@ def _run_batch_pipeline(batch_id: str, data_source_uri: str, max_segments: int) 
                 b.update(fields)
         store.write("batches", batches)
 
-    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(PROJECT_ROOT)}
-    OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
-    mp4_dir = OUTPUTS_ROOT / "mp4s"
-    mp4_dir.mkdir(parents=True, exist_ok=True)
-    index_path = OUTPUTS_ROOT / "segment_index.json"
-    scene_jsonl = OUTPUTS_ROOT / "waymo_scene_windows.jsonl"
-    embed_jsonl = OUTPUTS_ROOT / "waymo_window_embeddings.jsonl"
-    npz_path = OUTPUTS_ROOT / "waymo_clusters.npz"
-    clusters_jsonl = OUTPUTS_ROOT / "waymo_clusters.jsonl"
-    flagged_jsonl = OUTPUTS_ROOT / "flagged_windows.jsonl"
+    base_env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(PROJECT_ROOT)}
+    bucket = os.environ.get("VERITY_BUCKET", "gs://nvidia-adr-waymo-segment-videos/verity")
+    signer_key = os.environ.get("VERITY_SIGNER_KEY", "")
+    session_dir = OUTPUTS_ROOT / "sessions" / batch_id
+    session_dir.mkdir(parents=True, exist_ok=True)
 
-    stages = [
-        # Stage 1: Parquet -> MP4 -> GCS + signed-URL index
-        ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_video_pipeline",
-          "--num-segments", str(max_segments),
-          "--out-dir", str(mp4_dir),
-          "--index-out", str(index_path),
-          *(["--data-source-uri", data_source_uri] if data_source_uri else [])],
-         "mp4"),
-        # Stage 2: GCS frame URIs -> SceneWindow JSONL
-        ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_extract_scene_windows",
-          "--output-jsonl", str(scene_jsonl), "--max-segments", str(max_segments),
-          "--data-source-uri", data_source_uri], "extract"),
-        # Stage 3: SceneWindow JSONL -> Cosmos Embed1 -> embedding JSONL
-        ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_embed_scenes",
-          "--input-jsonl", str(scene_jsonl), "--output-jsonl", str(embed_jsonl)], "embed"),
-        # Stage 4: embeddings -> UMAP(50d) -> HDBSCAN -> 3D UMAP -> cluster JSONL
-        ([sys.executable, "-u", "-m", "waymo_pipeline.waymo_cluster_embeddings",
-          "--input-jsonl", str(embed_jsonl), "--output-npz", str(npz_path),
-          "--output-jsonl", str(clusters_jsonl), "--flagged-jsonl", str(flagged_jsonl)], "cluster"),
-    ]
+    def _run(args: list[str], stage: str, env: dict) -> Any:
+        _update(stage=stage)
+        return subprocess.run(args, cwd=str(PROJECT_ROOT), env=env,
+                              capture_output=True, text=True, check=False)
 
     try:
-        for args, stage_name in stages:
-            _update(stage=stage_name)
-            completed = subprocess.run(
-                args, cwd=str(PROJECT_ROOT), env=env,
-                capture_output=True, text=True, check=False,
-            )
-            if completed.returncode != 0:
-                _update(
-                    status="failed", stage=stage_name,
-                    error=(completed.stderr or completed.stdout)[-2000:],
-                    completedAt=_now_iso(),
-                )
-                return
+        seg_ids = _list_segment_ids(data_source_uri, max_segments or 0)
+        if not seg_ids:
+            _update(status="failed", stage="ingest", completedAt=_now_iso(),
+                    error=f"No .parquet segments found under {data_source_uri}.")
+            return
 
-        clusters = _read_jsonl(clusters_jsonl)
-        _update(
-            status="completed",
-            stage="done",
-            scenesProcessed=len(clusters),
-            totalScenes=len(clusters),
-            completedAt=_now_iso(),
-        )
+        # --- Stage 1: INGEST via canonical Module 1 (user ADC reads source) ---
+        ingest_env = {**base_env, "GOOGLE_APPLICATION_CREDENTIALS": ""}
+        ingest = _run([sys.executable, "-u", "-m", "pipeline.run", "ingest",
+                       "--source-format", "waymo_parquet",
+                       "--source-root", data_source_uri,
+                       "--bucket", bucket,
+                       "--segments", ",".join(seg_ids)], "ingest", ingest_env)
+        if ingest.returncode != 0:
+            _update(status="failed", stage="ingest", completedAt=_now_iso(),
+                    error=(ingest.stderr or ingest.stdout)[-2000:])
+            return
+        # Ingestion checkpoint — persists independently of any downstream analysis.
+        _update(stage="ingested", ingested=True, bucket=bucket, segments=seg_ids,
+                scenesProcessed=len(seg_ids), totalScenes=len(seg_ids))
+
+        n_windows = len(seg_ids)
+
+        # --- Stage 2: CLUSTER via Module 8 (modes: cluster, both) -------------
+        # Clustering needs embed1, which can't co-run with reason1 on the L40S.
+        # Borrow the GPU for embed only here (ingest above is GPU-free). The window
+        # swaps reason1 -> embed1 on enter and restores reason1 on exit even if
+        # clustering fails (guaranteed resting state). For mode "both" this exit is
+        # exactly what leaves us on reason1 for the analyze stage below — no manual
+        # swap. Stage labels: gpu:draining -> gpu:swapping_to_embed -> gpu:embed_ready
+        # (cluster runs) -> gpu:swapping_to_reason -> gpu:reason_ready.
+        if mode in ("cluster", "both"):
+            cluster_env = {**base_env, "GOOGLE_APPLICATION_CREDENTIALS": signer_key}
+            try:
+                with gpu.embed_window(on_stage=lambda s: _update(stage=f"gpu:{s}")):
+                    cluster = _run([sys.executable, "-u", "-m", "pipeline.run", "cluster",
+                                    "--bucket", bucket, "--output", str(session_dir),
+                                    "--cameras", "FRONT"], "cluster", cluster_env)
+            except Exception as swap_error:  # noqa: BLE001 — GPU swap failed; ingest persists
+                _update(status="failed", stage="cluster", completedAt=_now_iso(),
+                        error=f"GPU swap failed: {swap_error}")
+                return
+            if cluster.returncode != 0:
+                _update(status="failed", stage="cluster", completedAt=_now_iso(),
+                        error=(cluster.stderr or cluster.stdout)[-2000:])
+                return
+            produced = session_dir / "clusters.json"
+            if produced.exists():
+                (OUTPUTS_ROOT / "clusters.json").write_text(produced.read_text())
+                n_windows = len(json.loads(produced.read_text()).get("assignments", []))
+                _ensure_flagged_windows(force=True)  # link cluster -> analysis input
+
+        # --- Stage 3: ANALYZE (discovery -> Judge proposals) (modes: reason, both) ---
+        # Runs the encoder (Reason1) -> Hypothesizer -> Scorer over the ingested
+        # windows. After the embed window above closed, the GPU is already back on
+        # reason1; reason_lease just confirms that resting state (and blocks any
+        # concurrent embed swap for the duration). User ADC reads the clips; the
+        # encoder inlines gs:// clips as base64 for the local NIM.
+        if mode in ("reason", "both"):
+            analyze_env = {**base_env, "GOOGLE_APPLICATION_CREDENTIALS": ""}
+            try:
+                with gpu.reason_lease():
+                    analyze = _run([sys.executable, "-u", "-m", "pipeline.run", "analyze",
+                                    "--bucket", bucket, "--output", str(session_dir),
+                                    "--cameras", "FRONT"], "analyze", analyze_env)
+            except GpuBusyError as busy:
+                _update(status="failed", stage="analyze", completedAt=_now_iso(),
+                        error=f"GPU busy, could not start reasoning: {busy}")
+                return
+            if analyze.returncode != 0:
+                _update(status="failed", stage="analyze", completedAt=_now_iso(),
+                        error=(analyze.stderr or analyze.stdout)[-2000:])
+                return
+            scored = session_dir / "scored.json"
+            if scored.exists():
+                # Canonical path the Judge UI server serves.
+                (OUTPUTS_ROOT / "judge_scored.json").write_text(scored.read_text())
+
+        _update(status="completed", stage="done", completedAt=_now_iso(),
+                scenesProcessed=n_windows, totalScenes=n_windows)
     except Exception as error:  # noqa: BLE001
         _update(status="failed", error=str(error), completedAt=_now_iso())
 
@@ -273,12 +409,14 @@ async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
             status_code=400,
         )
 
+    mode = payload.mode if payload.mode in ("cluster", "reason", "both") else "both"
     batch_id = f"batch-{uuid.uuid4().hex[:8]}"
     record = {
         "id": batch_id,
         "label": payload.label,
         "dataSourceUri": payload.dataSourceUri,
         "region": payload.region,
+        "mode": mode,
         "status": "running",
         "stage": "queued",
         "scenesProcessed": 0,
@@ -291,7 +429,7 @@ async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
 
     # Run the pipeline off the request thread so the UI gets an immediate ack.
     asyncio.get_event_loop().run_in_executor(
-        None, _run_batch_pipeline, batch_id, payload.dataSourceUri, payload.maxSegments
+        None, _run_batch_pipeline, batch_id, payload.dataSourceUri, payload.maxSegments, mode
     )
     return JSONResponse({"batch": record}, status_code=201)
 
@@ -304,30 +442,32 @@ async def launch_batch(payload: LaunchBatchRequest) -> JSONResponse:
 def cluster_space() -> JSONResponse:
     """Return 3D cluster points and per-cluster statistics.
 
-    Built from waymo_clusters.jsonl produced by the clustering stage. Each row
-    has window_id, cluster_label, glosh_score, and coord_3d.
+    Built from clusters.json (ClusterReport) produced by Module 8 (clustering).
+    Each assignment has window_id {segment_id, window_idx}, cluster_id,
+    glosh_score, probability, and coords_3d.
     """
-    clusters = _read_jsonl(OUTPUTS_ROOT / "waymo_clusters.jsonl")
+    report_path = OUTPUTS_ROOT / "clusters.json"
+    report = json.loads(report_path.read_text()) if report_path.exists() else {"assignments": []}
 
     points: list[dict[str, Any]] = []
     per_cluster: dict[int, list[float]] = {}
-    for row in clusters:
-        coord = row.get("coord_3d") or [0.0, 0.0, 0.0]
-        cluster_label = int(row.get("cluster_label", -1))
+    for a in report.get("assignments", []):
+        coord = a.get("coords_3d") or [0.0, 0.0, 0.0]
+        wid = a.get("window_id") or {}
+        sid = f"{wid.get('segment_id', '')}/{int(wid.get('window_idx', 0)):04d}"
+        cluster_label = int(a.get("cluster_id", -1))
         is_noise = cluster_label == -1
         points.append({
-            "id": str(row.get("window_id", "")),
+            "id": sid,
             "x": float(coord[0]),
             "y": float(coord[1]),
             "z": float(coord[2]),
             "clusterId": cluster_label,
-            "sceneId": str(row.get("window_id", "")),
+            "sceneId": sid,
             "isNoise": is_noise,
         })
         if not is_noise:
-            per_cluster.setdefault(cluster_label, []).append(
-                float(row.get("cluster_probability", 0.0))
-            )
+            per_cluster.setdefault(cluster_label, []).append(float(a.get("probability", 0.0)))
 
     cluster_stats = [
         {
@@ -344,18 +484,25 @@ def cluster_space() -> JSONResponse:
 # Scene detail  (Cluster Space + Analysis tabs)
 # ---------------------------------------------------------------------------
 
-@app.get("/scenes/{scene_id}")
+@app.get("/scenes/{scene_id:path}")
 def get_scene(scene_id: str) -> JSONResponse:
     """Return one scene's detail: video URL, thumbnail, and annotations.
 
     Annotations are sourced from the latest reasoning output for the window
-    when available; otherwise from anomaly scenario tags. The video URL is
-    resolved from the Waymo segment index.
+    when available; otherwise from anomaly scenario tags. The video is served
+    through the runner's /video proxy (streams from GCS via ADC) so it plays
+    without signed URLs or an SA key.
     """
     flagged = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
     flagged_by_window = {r.get("window_id"): r for r in flagged}
     row = flagged_by_window.get(scene_id, {})
-    log_id = str(row.get("log_id", scene_id.split("_")[0]))
+    # scene_id is the window id "segment_id/window_idx". Parse the full segment
+    # id from it (NOT scene_id.split("_")[0], which truncates the Waymo context
+    # name and breaks every lookup).
+    seg_from_id, _, widx_str = scene_id.rpartition("/")
+    seg_from_id = seg_from_id or scene_id
+    window_idx = int(widx_str) if widx_str.isdigit() else 0
+    log_id = str(row.get("log_id") or seg_from_id)
 
     descriptions = _read_jsonl(OUTPUTS_ROOT / "reasoning" / "description_outputs.jsonl")
     latest_desc = next(
@@ -382,7 +529,23 @@ def get_scene(scene_id: str) -> JSONResponse:
         }
         scene_description = ""
 
-    video_url = _video_url_for(log_id, "FRONT")
+    # Weather + time-of-day come from Waymo `stats` ground truth (no reasoning
+    # model needed) — override whatever the reasoning stage left. Road type isn't
+    # a Waymo label, so it stays as-is until a Reason pass fills it in.
+    stats = _waymo_stats(seg_from_id)
+    if stats.get("weather"):
+        annotations["weather"] = stats["weather"]
+    if stats.get("timeOfDay"):
+        annotations["timeOfDay"] = stats["timeOfDay"]
+    if stats.get("location"):
+        annotations["location"] = stats["location"]
+
+    # Serve via the /video proxy (streams the window clip from GCS via ADC).
+    # Falls back to a pre-signed segment_index URL only if present.
+    video_url = (
+        f"{_VIDEO_API_BASE}/video/{seg_from_id}/{window_idx}?camera=FRONT"
+        if seg_from_id else _video_url_for(log_id, "FRONT")
+    )
     return JSONResponse({
         "id": scene_id,
         "logId": log_id,
@@ -392,6 +555,57 @@ def get_scene(scene_id: str) -> JSONResponse:
         "annotations": annotations,
         "cameraUrls": _segment_index().get(log_id, {}),
     })
+
+
+@app.get("/video/{segment_id}/{window_idx}")
+def video_proxy(segment_id: str, window_idx: int, request: Request, camera: str = "FRONT") -> Response:
+    """Stream a window's camera MP4 from GCS via ADC (no signed URL needed).
+
+    Supports HTTP Range so the browser <video> can seek. The clip lives at
+    {verity}/windows/{segment_id}/{window_idx:04d}/camera_{camera}.mp4.
+    """
+    import re  # noqa: PLC0415
+    from google.cloud import storage  # noqa: PLC0415
+
+    no_scheme = _VIDEO_BUCKET_URI.removeprefix("gs://").rstrip("/")
+    bucket_name, _, prefix = no_scheme.partition("/")
+    blob_name = f"{prefix}/windows/{segment_id}/{int(window_idx):04d}/camera_{camera}.mp4"
+
+    project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    try:
+        client = storage.Client(project=project)
+        blob = client.bucket(bucket_name).blob(blob_name)
+        blob.reload()  # populates size; raises if missing
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            {"detail": f"video not found for {segment_id}/{window_idx:04d} ({camera}): {exc}"},
+            status_code=404,
+        )
+
+    size = blob.size or 0
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and size:
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        start = int(m.group(1)) if m else 0
+        end = int(m.group(2)) if (m and m.group(2)) else size - 1
+        end = min(end, size - 1)
+        data = blob.download_as_bytes(start=start, end=end)  # GCS end is inclusive
+        return Response(
+            content=data, status_code=206, media_type="video/mp4",
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(end - start + 1),
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    data = blob.download_as_bytes()
+    return Response(
+        content=data, status_code=200, media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(len(data)),
+                 "Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,53 +668,124 @@ def _ensure_regression_suite() -> Path:
     return suite_path
 
 
-def _ensure_visual_manifest(scene_id: str) -> Path:
-    """Build a media manifest mapping the scene window to its FRONT-camera clip.
+def _scene_scoped_flagged(scene_id: str) -> Path | None:
+    """Write a 1-row flagged file for the CLICKED window so describe processes it.
 
-    Tries to resolve a local MP4 clip in this order:
-      1. Cached clip at outputs/waymo/clips/{log_id}_FRONT.mp4
-      2. Local MP4 written by the video pipeline stage under outputs/waymo/mp4s/
-      3. Signed GCS URL from segment_index.json — downloaded and cached locally
+    Without this, describe_and_debate --top-k 1 would analyze the global
+    top-anomaly window (not the one the user clicked), and its manifest wouldn't
+    match. Returns the path, or None if the window isn't among the clustered set.
+    """
+    rows = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
+    target = next((r for r in rows if r.get("window_id") == scene_id), None)
+    if target is None:
+        return None
+    target = {**target, "anomaly_rank": 1}
+    out = OUTPUTS_ROOT / "flagged_visuals" / "flagged_scene.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(target) + "\n", encoding="utf-8")
+    return out
+
+
+def _ensure_visual_manifest(scene_id: str) -> Path:
+    """Build a media manifest mapping the clicked window to a LOCAL FRONT clip.
+
+    Downloads the window's clip from GCS via ADC (verity/windows/{seg}/{idx:04d}/
+    camera_FRONT.mp4) — no signed URL needed, works for any ingested segment.
+    Falls back to a cached clip or a segment_index signed URL if present.
     """
     OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
     manifest_path = OUTPUTS_ROOT / "flagged_visuals" / "manifest.jsonl"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    flagged = _read_jsonl(OUTPUTS_ROOT / "flagged_windows.jsonl")
-    row = next((r for r in flagged if r.get("window_id") == scene_id), {})
-    log_id = str(row.get("log_id", scene_id.split("_")[0]))
+    seg, _, widx = scene_id.rpartition("/")
+    seg = seg or scene_id
+    window_idx = int(widx) if widx.isdigit() else 0
 
     clip_dir = OUTPUTS_ROOT / "clips"
     clip_dir.mkdir(parents=True, exist_ok=True)
-    local_clip = clip_dir / f"{log_id}_FRONT.mp4"
+    local_clip = clip_dir / f"{seg}_{window_idx:04d}_FRONT.mp4"
+    mp4_path = ""
 
-    # 1. Already cached
-    if local_clip.exists():
+    if local_clip.exists() and local_clip.stat().st_size > 0:
         mp4_path = str(local_clip)
     else:
-        # 2. Written locally by the video pipeline stage
-        pipeline_clip = OUTPUTS_ROOT / "mp4s" / log_id / f"{log_id}_FRONT.mp4"
-        if pipeline_clip.exists():
-            mp4_path = str(pipeline_clip)
-        else:
-            # 3. Download from signed GCS URL and cache
-            index = _segment_index()
-            signed_url = index.get(log_id, {}).get("FRONT", "")
+        # Download the window clip from GCS via ADC (the durable, key-free path).
+        try:
+            from google.cloud import storage  # noqa: PLC0415
+            no_scheme = _VIDEO_BUCKET_URI.removeprefix("gs://").rstrip("/")
+            bucket_name, _, prefix = no_scheme.partition("/")
+            blob_name = f"{prefix}/windows/{seg}/{window_idx:04d}/camera_FRONT.mp4"
+            project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            storage.Client(project=project).bucket(bucket_name).blob(blob_name).download_to_filename(str(local_clip))
+            mp4_path = str(local_clip)
+        except Exception as exc:  # noqa: BLE001
+            import sys  # noqa: PLC0415
+            print(f"[runner] window clip ADC download failed for {scene_id}: {exc}", file=sys.stderr)
+            # Fallback: legacy segment_index signed URL.
+            signed_url = _segment_index().get(seg, {}).get("FRONT", "")
             if signed_url:
                 try:
-                    import urllib.request
+                    import urllib.request  # noqa: PLC0415
                     urllib.request.urlretrieve(signed_url, str(local_clip))
                     mp4_path = str(local_clip)
                 except Exception:  # noqa: BLE001
                     mp4_path = ""
-            else:
-                mp4_path = ""
 
     manifest_path.write_text(
         json.dumps({"window_id": scene_id, "grid_path": "", "mp4_path": mp4_path}) + "\n",
         encoding="utf-8",
     )
     return manifest_path
+
+
+def _ensure_flagged_windows(force: bool = False) -> bool:
+    """Make flagged_windows.jsonl available, deriving it from clusters.json.
+
+    The clustering stage (Module 8) writes clusters.json; the agentic-analysis
+    stage consumes flagged_windows.jsonl (AnomalyResultRecord rows). They were
+    never linked, so derive the flagged file from the cluster report's per-window
+    outlier (GLOSH) scores. Returns True if flagged windows exist, False if there
+    are no clusters at all.
+    """
+    flagged = OUTPUTS_ROOT / "flagged_windows.jsonl"
+    if not force and flagged.exists() and flagged.stat().st_size > 0:
+        return True
+    clusters = OUTPUTS_ROOT / "clusters.json"
+    if not clusters.exists():
+        return False
+    try:
+        assignments = json.loads(clusters.read_text()).get("assignments", [])
+    except (json.JSONDecodeError, OSError):
+        return False
+    if not assignments:
+        return False
+
+    def _glosh(a: dict) -> float:
+        return float(a.get("glosh_score", 0.0) or 0.0)
+
+    ranked = sorted(assignments, key=_glosh, reverse=True)
+    flagged.parent.mkdir(parents=True, exist_ok=True)
+    with open(flagged, "w", encoding="utf-8") as f:
+        for rank, a in enumerate(ranked, start=1):
+            wid = a.get("window_id") or {}
+            seg = str(wid.get("segment_id", ""))
+            idx = int(wid.get("window_idx", 0))
+            window_id = f"{seg}/{idx:04d}"
+            cluster_label = int(a.get("cluster_id", -1))
+            f.write(json.dumps({
+                "window_id": window_id,
+                "scene_token_hex": window_id,
+                "log_id": seg,
+                "scenario_tags": [],
+                "cluster_label": cluster_label,
+                "is_noise": cluster_label == -1,
+                "cluster_probability": float(a.get("probability", 0.0) or 0.0),
+                "outlier_score": _glosh(a),
+                "anomaly_rank": rank,
+                "quality": {},
+                "metadata": {"dataset": "waymo", "derived_from": "clusters.json"},
+            }) + "\n")
+    return True
 
 
 @app.post("/analysis/run-stream")
@@ -513,47 +798,75 @@ async def run_analysis_stream(payload: RunAnalysisRequest) -> StreamingResponse:
       {"kind":"error","detail": ...}
     """
     suite_path = _ensure_regression_suite()
-    manifest_path = _ensure_visual_manifest(payload.sceneId)
-    flagged_jsonl = OUTPUTS_ROOT / "flagged_windows.jsonl"
     reasoning_dir = OUTPUTS_ROOT / "reasoning"
-
-    args = [
-        sys.executable, "-u", "-m", "waymo_pipeline.waymo_describe_and_debate",
-        "--flagged-jsonl", str(flagged_jsonl),
-        "--visual-manifest-jsonl", str(manifest_path),
-        "--regression-suite-json", str(suite_path),
-        "--output-dir", str(reasoning_dir),
-        "--top-k", "1",
-        "--debate-rounds", str(payload.debateRounds),
-    ]
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(PROJECT_ROOT)}
 
     async def event_gen() -> Any:
-        if not flagged_jsonl.exists():
+        # 1. Link cluster output -> analysis input (derive flagged file if needed).
+        if not _ensure_flagged_windows():
             yield f"data: {json.dumps({'kind': 'error', 'detail': 'No clustered windows yet. Launch a batch first.'})}\n\n"
             return
+        # 2. Scope the run to the CLICKED window so describe + manifest agree.
+        scene_flagged = _scene_scoped_flagged(payload.sceneId)
+        if scene_flagged is None:
+            yield f"data: {json.dumps({'kind': 'error', 'detail': f'Scene {payload.sceneId!r} is not among the clustered windows.'})}\n\n"
+            return
+        # 3. Fetch the window clip (via ADC) and confirm it landed.
+        manifest_path = _ensure_visual_manifest(payload.sceneId)
+        try:
+            media_ok = any(
+                json.loads(line).get("mp4_path")
+                for line in manifest_path.read_text().splitlines() if line.strip()
+            )
+        except (OSError, json.JSONDecodeError):
+            media_ok = False
+        if not media_ok:
+            yield f"data: {json.dumps({'kind': 'error', 'detail': 'Could not fetch the video clip for this scene from the bucket (expected verity/windows/<segment>/<idx>/camera_FRONT.mp4).'})}\n\n"
+            return
 
-        proc = await asyncio.create_subprocess_exec(
-            *args, cwd=str(PROJECT_ROOT), env=env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        assert proc.stdout is not None
-        log_lines: list[str] = []
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                break
-            text = raw.decode("utf-8", errors="replace").rstrip("\n\r")
-            log_lines.append(text)
-            if text.startswith(PIPELINE_PROGRESS_PREFIX):
-                body = text[len(PIPELINE_PROGRESS_PREFIX):]
-                try:
-                    progress_payload = json.loads(body)
-                except json.JSONDecodeError:
-                    continue
-                yield f"data: {json.dumps({'kind': 'progress', 'payload': progress_payload})}\n\n"
+        args = [
+            sys.executable, "-u", "-m", "waymo_pipeline.waymo_describe_and_debate",
+            "--flagged-jsonl", str(scene_flagged),
+            "--visual-manifest-jsonl", str(manifest_path),
+            "--regression-suite-json", str(suite_path),
+            "--output-dir", str(reasoning_dir),
+            "--top-k", "1",
+            "--debate-rounds", str(payload.debateRounds),
+        ]
+        # Reason1 runs the VLM debate; it shares the L40S with embed1 and can't
+        # co-run. Take the reason lease for the subprocess's lifetime: if an ingest
+        # batch is currently embedding (reason1 down), reject with "busy"; otherwise
+        # hold it so a batch launched now drains/waits for us before swapping.
+        try:
+            reason_lease = gpu.reason_lease()
+            reason_lease.__enter__()
+        except GpuBusyError as busy:
+            yield f"data: {json.dumps({'kind': 'error', 'detail': str(busy)})}\n\n"
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args, cwd=str(PROJECT_ROOT), env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            assert proc.stdout is not None
+            log_lines: list[str] = []
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                text = raw.decode("utf-8", errors="replace").rstrip("\n\r")
+                log_lines.append(text)
+                if text.startswith(PIPELINE_PROGRESS_PREFIX):
+                    body = text[len(PIPELINE_PROGRESS_PREFIX):]
+                    try:
+                        progress_payload = json.loads(body)
+                    except json.JSONDecodeError:
+                        continue
+                    yield f"data: {json.dumps({'kind': 'progress', 'payload': progress_payload})}\n\n"
 
-        code = await proc.wait()
+            code = await proc.wait()
+        finally:
+            reason_lease.__exit__(None, None, None)
         combined = "\n".join(log_lines)
         if code != 0:
             yield f"data: {json.dumps({'kind': 'error', 'code': code, 'detail': 'Analysis run failed.', 'logTail': combined[-8000:]})}\n\n"

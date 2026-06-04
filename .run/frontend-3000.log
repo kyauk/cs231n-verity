@@ -6,24 +6,307 @@
 - Local:         http://localhost:3000
 - Network:       http://172.27.41.141:3000
 - Environments: .env.local
-✓ Ready in 260ms
+✓ Ready in 253ms
 
- GET / 200 in 398ms (next.js: 111ms, application-code: 286ms)
- GET / 200 in 44ms (next.js: 3ms, application-code: 41ms)
- GET / 200 in 37ms (next.js: 2ms, application-code: 35ms)
- GET /icon-light-32x32.png 404 in 103ms (next.js: 16ms, application-code: 87ms)
- GET /icon.svg 404 in 67ms (next.js: 6ms, application-code: 60ms)
- GET /icon-dark-32x32.png 404 in 66ms (next.js: 16ms, application-code: 51ms)
- GET /apple-icon.png 404 in 24ms (next.js: 2ms, application-code: 21ms)
- GET /apple-touch-icon-precomposed.png 404 in 28ms (next.js: 3ms, application-code: 25ms)
- GET /apple-touch-icon.png 404 in 29ms (next.js: 2ms, application-code: 27ms)
- GET /icon-light-32x32.png 404 in 23ms (next.js: 2ms, application-code: 20ms)
- GET /icon-dark-32x32.png 404 in 23ms (next.js: 2ms, application-code: 21ms)
- GET /icon.svg 404 in 23ms (next.js: 1941µs, application-code: 21ms)
- GET / 200 in 43ms (next.js: 3ms, application-code: 39ms)
+ GET / 200 in 398ms (next.js: 117ms, application-code: 281ms)
+ GET / 200 in 48ms (next.js: 3ms, application-code: 45ms)
+ GET / 200 in 38ms (next.js: 3ms, application-code: 35ms)
+ GET / 200 in 35ms (next.js: 3ms, application-code: 32ms)
+ GET / 200 in 43ms (next.js: 4ms, application-code: 39ms)
+ GET / 200 in 35ms (next.js: 1636µs, application-code: 33ms)
+ GET / 200 in 50ms (next.js: 1991µs, application-code: 48ms)
  GET / 200 in 39ms (next.js: 3ms, application-code: 36ms)
-✓ Compiled in 65ms
-✓ Compiled in 51ms
+ GET / 200 in 40ms (next.js: 2ms, application-code: 37ms)
+ GET / 200 in 45ms (next.js: 3ms, application-code: 42ms)
+ GET / 200 in 45ms (next.js: 2ms, application-code: 43ms)
+ GET / 200 in 34ms (next.js: 2ms, application-code: 32ms)
+ GET / 200 in 40ms (next.js: 3ms, application-code: 37ms)
+ GET / 200 in 53ms (next.js: 1719µs, application-code: 52ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+✓ Compiled in 329ms
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 42ms (next.js: 4ms, application-code: 38ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 45ms (next.js: 1718µs, application-code: 44ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.27.41.141:3000
+- Environments: .env.local
+✓ Ready in 195ms
+
+ GET / 200 in 413ms (next.js: 119ms, application-code: 293ms)
+ GET / 200 in 40ms (next.js: 3ms, application-code: 37ms)
+ GET / 200 in 44ms (next.js: 3ms, application-code: 42ms)
+ GET / 200 in 35ms (next.js: 3ms, application-code: 32ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET / 200 in 39ms (next.js: 3ms, application-code: 36ms)
+ GET / 200 in 50ms (next.js: 3ms, application-code: 48ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+Failed to proxy http://localhost:8000/batches Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/scenarios Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/cluster-space Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 96ms (next.js: 7ms, application-code: 89ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 95ms (next.js: 3ms, application-code: 92ms)
+ GET / 200 in 166ms (next.js: 4ms, application-code: 162ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 97ms (next.js: 3ms, application-code: 94ms)
+ GET / 200 in 152ms (next.js: 3ms, application-code: 149ms)
+✓ Compiled in 164ms
+ GET / 200 in 152ms (next.js: 6ms, application-code: 146ms)
+ GET / 200 in 93ms (next.js: 3ms, application-code: 90ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
 ✓ Compiled in 46ms
- GET / 200 in 40ms (next.js: 4ms, application-code: 36ms)
- GET / 200 in 38ms (next.js: 2ms, application-code: 36ms)
+✓ Compiled in 144ms
+ GET / 200 in 39ms (next.js: 4ms, application-code: 35ms)
+ GET / 200 in 34ms (next.js: 1932µs, application-code: 32ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET / 200 in 36ms (next.js: 2ms, application-code: 34ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET / 200 in 43ms (next.js: 1950µs, application-code: 41ms)
+Failed to proxy http://localhost:8000/cluster-space Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/batches Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/scenarios Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+ GET / 200 in 33ms (next.js: 1446µs, application-code: 31ms)
+Failed to proxy http://localhost:8000/batches Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/cluster-space Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Failed to proxy http://localhost:8000/scenarios Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at <unknown> (Error: connect ECONNREFUSED 127.0.0.1:8000) {
+  errno: -111,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 8000
+}
+ GET / 200 in 38ms (next.js: 1426µs, application-code: 37ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+✓ Compiled in 50ms
+✓ Compiled in 49ms
+✓ Compiled in 44ms
+✓ Compiled in 43ms
+✓ Compiled in 36ms
+✓ Compiled in 55ms
+ GET / 200 in 38ms (next.js: 4ms, application-code: 35ms)
+ GET / 200 in 49ms (next.js: 1559µs, application-code: 47ms)
+ GET / 200 in 35ms (next.js: 2ms, application-code: 33ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+ GET / 200 in 35ms (next.js: 1887µs, application-code: 33ms)
+✓ Compiled in 46ms
+✓ Compiled in 39ms
+✓ Compiled in 44ms
+✓ Compiled in 43ms
+✓ Compiled in 39ms
+ GET / 200 in 40ms (next.js: 3ms, application-code: 38ms)
+✓ Compiled in 95ms
+ GET / 200 in 38ms (next.js: 3ms, application-code: 36ms)
+ GET / 200 in 34ms (next.js: 1754µs, application-code: 33ms)
+✓ Compiled in 46ms

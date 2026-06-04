@@ -4,9 +4,24 @@ Uses StubEmbedClient + a fake WindowStorageBase so the full
 embed -> UMAP -> HDBSCAN -> ClusterReport path runs deterministically.
 """
 
+import pytest
+
 from pipeline.interfaces.cluster import ClusterReport
 from pipeline.interfaces.window import WindowKey
-from pipeline.modules.clustering import Clusterer, ClustererConfig, StubEmbedClient
+from pipeline.modules.clustering import (
+    Clusterer,
+    ClustererConfig,
+    EmbedUnavailableError,
+    StubEmbedClient,
+)
+
+
+class _DeadEmbedClient:
+    """Embedder that always fails — simulates the embed NIM being down."""
+    model_id = "dead/embed"
+
+    def embed(self, video_url: str):
+        raise EmbedUnavailableError("endpoint down")
 
 
 class _FakeStorage:
@@ -43,6 +58,14 @@ def test_full_run_returns_valid_report():
         assert a.window_id.segment_id.startswith("seg_")
     # round-trips
     assert ClusterReport.from_json(report.to_json()) == report
+
+
+def test_all_embeds_failing_raises_not_empty_report():
+    """If every window fails to embed, run() must raise — never a hollow empty
+    report that downstream would mistake for a successful (but empty) clustering."""
+    c = Clusterer(_DeadEmbedClient(), ClustererConfig())
+    with pytest.raises(EmbedUnavailableError):
+        c.run(_windows(10), _FakeStorage())
 
 
 def test_too_few_windows_degrades_gracefully():
