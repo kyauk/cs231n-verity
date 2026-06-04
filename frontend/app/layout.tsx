@@ -7,7 +7,7 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Adversarial Environment Generator',
+  title: 'Verity Platform',
   description: 'Autonomous vehicle safety validation system',
   generator: 'v0.app',
   icons: {

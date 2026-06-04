@@ -1,3 +1,7 @@
+# DEPRECATED (2026-06-04): superseded by pipeline/modules/clustering (Module 8),
+# which embeds windows via the shared WindowStorageBase Protocol. Kept only until
+# the :8000 waymo_runner batch is repointed to `pipeline.run cluster`
+# (ARCHITECTURE_PROPOSAL.md §8, retirement phase 2), then delete this file.
 """Waymo scene-window JSONL -> embedding-vector JSONL transformer.
 
 Mirrors ``pipeline/embed_scenes.py``. Each scene window is sliced into temporal

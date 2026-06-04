@@ -24,5 +24,57 @@
     "startedAt": "2026-05-19T17:55:16.187594+00:00",
     "completedAt": "2026-05-19T17:55:58.885610+00:00",
     "error": "ohttp/client.py\", line 1521, in __aenter__\n    self._resp: _RetType = await self._coro\n                           ^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 788, in _request\n    resp = await handler(req)\n           ^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/client.py\", line 742, in _connect_and_send_request\n    conn = await self._connector.connect(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 672, in connect\n    proto = await self._create_connection(req, traces, timeout)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1251, in _create_connection\n    _, proto = await self._create_direct_connection(req, traces, timeout)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1623, in _create_direct_connection\n    raise last_exc\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1592, in _create_direct_connection\n    transp, proto = await self._wrap_create_connection(\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jkyauk/Desktop/CS210/NVIDIA-ADR-1/.venv/lib/python3.11/site-packages/aiohttp/connector.py\", line 1327, in _wrap_create_connection\n    raise ClientConnectorCertificateError(req.connection_key, exc) from exc\naiohttp.client_exceptions.ClientConnectorCertificateError: Cannot connect to host storage.googleapis.com:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)')]\n"
+  },
+  {
+    "id": "batch-fa529ac8",
+    "label": "test_batch",
+    "dataSourceUri": "gs://waymo_open_dataset_v_2_0_1/validation/camera_image",
+    "region": "US-West",
+    "status": "failed",
+    "stage": "mp4",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-06-03T23:14:10.527542+00:00",
+    "completedAt": "2026-06-03T23:14:31.250189+00:00",
+    "error": "\", line 86, in _run_code\n    exec(code, run_globals)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 387, in <module>\n    main()\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 374, in main\n    seg_id, urls = future.result()\n  File \"/usr/lib/python3.10/concurrent/futures/_base.py\", line 451, in result\n    return self.__get_result()\n  File \"/usr/lib/python3.10/concurrent/futures/_base.py\", line 403, in __get_result\n    raise self._exception\n  File \"/usr/lib/python3.10/concurrent/futures/thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 285, in _process_one\n    return seg_id, generate_signed_urls(blob_names, gcs_client, sign_as)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 221, in generate_signed_urls\n    return {\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 222, in <dictcomp>\n    cam: sign_blob(bucket.blob(blob_name), sign_as)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 209, in sign_blob\n    return blob.generate_signed_url(\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/blob.py\", line 662, in generate_signed_url\n    return helper(\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/_signing.py\", line 551, in generate_signed_url_v4\n    ensure_signed_credentials(credentials)\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/_signing.py\", line 58, in ensure_signed_credentials\n    raise AttributeError(\nAttributeError: you need a private key to sign credentials.the credentials you are currently using <class 'google.oauth2.credentials.Credentials'> just contains a token. see https://googleapis.dev/python/google-api-core/latest/auth.html#setting-up-a-service-account for more details.\n"
+  },
+  {
+    "id": "batch-babe921f",
+    "label": "test",
+    "dataSourceUri": "gs://waymo_open_dataset_v_2_0_1/validation/camera_image",
+    "region": "US-East",
+    "status": "failed",
+    "stage": "mp4",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-06-03T23:15:24.042349+00:00",
+    "completedAt": "2026-06-03T23:15:29.408695+00:00",
+    "error": "\", line 86, in _run_code\n    exec(code, run_globals)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 387, in <module>\n    main()\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 374, in main\n    seg_id, urls = future.result()\n  File \"/usr/lib/python3.10/concurrent/futures/_base.py\", line 451, in result\n    return self.__get_result()\n  File \"/usr/lib/python3.10/concurrent/futures/_base.py\", line 403, in __get_result\n    raise self._exception\n  File \"/usr/lib/python3.10/concurrent/futures/thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 285, in _process_one\n    return seg_id, generate_signed_urls(blob_names, gcs_client, sign_as)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 221, in generate_signed_urls\n    return {\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 222, in <dictcomp>\n    cam: sign_blob(bucket.blob(blob_name), sign_as)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_video_pipeline.py\", line 209, in sign_blob\n    return blob.generate_signed_url(\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/blob.py\", line 662, in generate_signed_url\n    return helper(\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/_signing.py\", line 551, in generate_signed_url_v4\n    ensure_signed_credentials(credentials)\n  File \"/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/cloud/storage/_signing.py\", line 58, in ensure_signed_credentials\n    raise AttributeError(\nAttributeError: you need a private key to sign credentials.the credentials you are currently using <class 'google.oauth2.credentials.Credentials'> just contains a token. see https://googleapis.dev/python/google-api-core/latest/auth.html#setting-up-a-service-account for more details.\n"
+  },
+  {
+    "id": "batch-4dbf5b45",
+    "label": "test_attempt_2",
+    "dataSourceUri": "gs://waymo_open_dataset_v_2_0_1/validation/camera_image",
+    "region": "US-West",
+    "status": "failed",
+    "stage": "embed",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-06-03T23:25:54.854770+00:00",
+    "completedAt": "2026-06-03T23:26:42.670867+00:00",
+    "error": "/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.\n  warnings.warn(message, FutureWarning)\n/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.cloud.storage_control_v2 once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.cloud.storage_control_v2 past that date.\n  warnings.warn(message, FutureWarning)\nTraceback (most recent call last):\n  File \"/usr/lib/python3.10/runpy.py\", line 196, in _run_module_as_main\n    return _run_code(code, main_globals, None,\n  File \"/usr/lib/python3.10/runpy.py\", line 86, in _run_code\n    exec(code, run_globals)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 321, in <module>\n    main()\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 266, in main\n    verify_cosmos(args.cosmos_url)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 182, in verify_cosmos\n    raise RuntimeError(f\"Cosmos health check failed: {r.status_code}\")\nRuntimeError: Cosmos health check failed: 404\n"
+  },
+  {
+    "id": "batch-4db00c96",
+    "label": "test_2",
+    "dataSourceUri": "gs://waymo_open_dataset_v_2_0_1/validation/camera_image",
+    "region": "US-West",
+    "status": "failed",
+    "stage": "embed",
+    "scenesProcessed": 0,
+    "totalScenes": null,
+    "startedAt": "2026-06-03T23:26:14.454932+00:00",
+    "completedAt": "2026-06-03T23:26:35.479366+00:00",
+    "error": "/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.\n  warnings.warn(message, FutureWarning)\n/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.cloud.storage_control_v2 once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.cloud.storage_control_v2 past that date.\n  warnings.warn(message, FutureWarning)\nTraceback (most recent call last):\n  File \"/usr/lib/python3.10/runpy.py\", line 196, in _run_module_as_main\n    return _run_code(code, main_globals, None,\n  File \"/usr/lib/python3.10/runpy.py\", line 86, in _run_code\n    exec(code, run_globals)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 321, in <module>\n    main()\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 266, in main\n    verify_cosmos(args.cosmos_url)\n  File \"/home/ubuntu/NVIDIA-ADR-1/waymo_pipeline/waymo_embed_scenes.py\", line 182, in verify_cosmos\n    raise RuntimeError(f\"Cosmos health check failed: {r.status_code}\")\nRuntimeError: Cosmos health check failed: 404\n"
   }
 ]

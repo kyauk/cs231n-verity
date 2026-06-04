@@ -1,0 +1,18 @@
+INFO:     Started server process [49402]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+[JudgeUI] Loaded 30 proposals (27 accepted) from /home/ubuntu/NVIDIA-ADR-1/outputs/session-1/scored.json
+[JudgeUI] WindowStorage initialized for gs://nvidia-adr-waymo-segment-videos/verity
+INFO:     127.0.0.1:35474 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35486 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45360 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60844 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60836 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60846 - "GET /judge/proposals/95f3c4c2658134e8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36156 - "GET /judge/proposals/1115e0bf43b91ec7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47334 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47336 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42156 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42172 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48882 - "GET /judge/proposals HTTP/1.1" 200 OK

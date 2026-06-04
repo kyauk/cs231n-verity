@@ -135,3 +135,29 @@ Naming this tension changes the eval too: rarity-in-sample is measurable, but **
 - That fix improves *display*, not *discovery*. The thing you're missing: **you're discovering novelty inside a hand-designed symbol space, which caps novelty at what you pre-enumerated and conflates rarity with contradiction.**
 - The right structure is **discover in a learned continuous representation (density), describe in symbols** — keeping the current pipeline as the description/interpretability layer.
 - The deepest issue is a genuine tension: **the rarest real scenarios are off your data manifold, so a data-only plausibility prior can't certify them** — you need an external (physics/world-model/human) prior, and a validation loop tied to actual AV failures, before the novelty score means anything.
+
+---
+
+## 8. Implementation status — clustering merged as a module (2026-06-04)
+
+The embedding arm is no longer a parallel `waymo_pipeline/` universe; its core is now a **first-class lego module** inside `pipeline/`, sharing Module 1's ingestion.
+
+### ✅ Done (built + verified on this instance)
+- **`pipeline/interfaces/cluster.py`** — `WindowEmbedding`, `ClusterAssignment`, `ClusterReport` (dataclass + `to_json`/`from_json`), pinned by a round-trip test. Same contract style as every other interface.
+- **`pipeline/modules/clustering/`** — Module 8:
+  - `config.py`: `EmbedClient` Protocol + `ClustererConfig(.from_env)` (UMAP/HDBSCAN/GLOSH knobs from `.env`) + errors.
+  - `embed.py`: `NIMEmbedClient` (Cosmos-Embed, ported request) + `StubEmbedClient` (offline/CI).
+  - `clusterer.py`: `Clusterer` — **reads windows via the `WindowStorageBase` Protocol** (the exact surface the encoder uses → shares Module 1 ingestion, zero coupling), runs the ported L2→UMAP(cosine)→HDBSCAN(GLOSH)→3D-viz math, returns `ClusterReport`. Degrades gracefully below 5 windows.
+- **`pipeline/run.py cluster`** subcommand — peer to `analyze`; `ingest` → `analyze` (Judge) **and/or** `cluster`, off one ingest.
+- **Verified:** 6 module tests + 36 interface round-trips pass; lego rule clean (imports only `pipeline.interfaces` + own package); all four subcommands parse (Judge path untouched); `cluster --stub` ran over the **same 48 ingested windows** the Judge run used → `clusters.json` (round-trips).
+
+### ⏳ Remaining — phased retirement of `waymo_pipeline/`
+The directory can't be deleted wholesale yet: it still hosts the `:8000` API (Ingest/Cluster/Analysis tabs) **and** the deferred `debate`/Analysis path. Phases:
+
+1. **Unify ingest on canonical windows.** Point the batch at `pipeline.run ingest` (writes `windows/{seg}/{idx}/…`) so Judge *and* Cluster read the same artifact. Retires `waymo_video_pipeline.py` + `waymo_extract_scene_windows.py` (segment-MP4 + `SceneWindow` layout). *(NIM-free; instance-agnostic.)*
+2. **Repoint the `:8000` API.** `waymo_runner` batch → `pipeline.run ingest` + `pipeline.run cluster`; adapt `/cluster-space` to read `clusters.json` (`ClusterReport` → `ClusterPoint[]`). Then **delete** `waymo_embed_scenes.py` + `waymo_cluster_embeddings.py` (superseded by Module 8).
+3. **Point the Cluster Space tab** at the new output (proxy/route already single-origin).
+4. **Real embeddings** — the only step needing a model: re-pull `cosmos-embed1` *here* (fits the L40S; frees by dropping unused `reason2-8b`) **or** use the unified **Cosmos-3** container on the CUDA-13 box. *Nothing else needs the new box — earlier "finish on Cosmos-3" was an overstatement; only meaningful-cluster verification needs an embed NIM.*
+5. **Debate / Analysis** (`debate_actors`, `react_loop`, `proposal_builder`, `waymo_describe_and_debate`, `waymo_populate_pgvector`, `debate_*`) — out of scope now; later becomes its own module the same way. Until then `waymo_runner.py` + `store.py` stay.
+
+**Net:** the algorithmic merge (the hard, design-bearing part) is done and lego-clean; what remains is mechanical repointing + one model-dependent verification, all instance-agnostic except the embed run itself.

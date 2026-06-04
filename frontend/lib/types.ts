@@ -8,6 +8,8 @@ export interface BatchJob {
   totalScenes: number | null
   startedAt: string
   completedAt: string | null
+  stage?: string
+  error?: string | null
 }
 
 export interface ClusterPoint {

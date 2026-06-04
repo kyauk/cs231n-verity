@@ -1,3 +1,7 @@
+# DEPRECATED (2026-06-04): the UMAP/HDBSCAN/GLOSH math here now lives in
+# pipeline/modules/clustering/clusterer.py (Module 8). Kept only until the :8000
+# waymo_runner batch is repointed to `pipeline.run cluster`
+# (ARCHITECTURE_PROPOSAL.md §8, retirement phase 2), then delete this file.
 """Loads Waymo window embeddings, runs two-pass UMAP + HDBSCAN.
 
 Mirrors ``pipeline/cluster_embeddings.py``. Saves cluster labels + 3D

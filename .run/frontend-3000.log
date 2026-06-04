@@ -1,0 +1,29 @@
+
+> my-project@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.27.41.141:3000
+- Environments: .env.local
+✓ Ready in 260ms
+
+ GET / 200 in 398ms (next.js: 111ms, application-code: 286ms)
+ GET / 200 in 44ms (next.js: 3ms, application-code: 41ms)
+ GET / 200 in 37ms (next.js: 2ms, application-code: 35ms)
+ GET /icon-light-32x32.png 404 in 103ms (next.js: 16ms, application-code: 87ms)
+ GET /icon.svg 404 in 67ms (next.js: 6ms, application-code: 60ms)
+ GET /icon-dark-32x32.png 404 in 66ms (next.js: 16ms, application-code: 51ms)
+ GET /apple-icon.png 404 in 24ms (next.js: 2ms, application-code: 21ms)
+ GET /apple-touch-icon-precomposed.png 404 in 28ms (next.js: 3ms, application-code: 25ms)
+ GET /apple-touch-icon.png 404 in 29ms (next.js: 2ms, application-code: 27ms)
+ GET /icon-light-32x32.png 404 in 23ms (next.js: 2ms, application-code: 20ms)
+ GET /icon-dark-32x32.png 404 in 23ms (next.js: 2ms, application-code: 21ms)
+ GET /icon.svg 404 in 23ms (next.js: 1941µs, application-code: 21ms)
+ GET / 200 in 43ms (next.js: 3ms, application-code: 39ms)
+ GET / 200 in 39ms (next.js: 3ms, application-code: 36ms)
+✓ Compiled in 65ms
+✓ Compiled in 51ms
+✓ Compiled in 46ms
+ GET / 200 in 40ms (next.js: 4ms, application-code: 36ms)
+ GET / 200 in 38ms (next.js: 2ms, application-code: 36ms)

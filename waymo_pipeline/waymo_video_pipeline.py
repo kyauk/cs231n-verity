@@ -185,12 +185,43 @@ def upload_mp4s(
 
 # -- Step 4: Generate signed URLs ---------------------------------------------
 
+_SIGNER_CREDS: Any = None  # cached service-account creds loaded from a key file
+
+
+def _explicit_signer_credentials() -> Any:
+    """Load a service-account key for v4 signing if one is configured via env
+    (VERITY_SIGNER_KEY or GOOGLE_SIGNER_KEY).
+
+    This decouples *reading* from *signing*: Stage 1 reads the Waymo source
+    bucket with ambient ADC (a user token, which the public dataset grants),
+    but a user token CANNOT sign v4 URLs. Loading a signer key here lets us sign
+    the dest-bucket MP4 URLs with a real private key while reads still use ADC —
+    no impersonation grant and no public bucket required. Returns None if unset.
+    """
+    global _SIGNER_CREDS
+    if _SIGNER_CREDS is not None:
+        return _SIGNER_CREDS or None
+    key_path = os.environ.get("VERITY_SIGNER_KEY") or os.environ.get("GOOGLE_SIGNER_KEY")
+    if key_path and os.path.exists(key_path):
+        from google.oauth2 import service_account
+        _SIGNER_CREDS = service_account.Credentials.from_service_account_file(key_path)
+    else:
+        _SIGNER_CREDS = False  # sentinel: checked, none available
+    return _SIGNER_CREDS or None
+
+
 def sign_blob(
     blob: storage.Blob,
     sign_as: str | None,
     expiry_days: int = SIGNED_URL_EXPIRY_DAYS,
 ) -> str:
-    """Generate a v4 signed GET URL for one blob (impersonating an SA if asked)."""
+    """Generate a v4 signed GET URL for one blob.
+
+    Signing credential, in priority order:
+      1. impersonate ``sign_as`` (needs roles/iam.serviceAccountTokenCreator), else
+      2. an explicit signer key from VERITY_SIGNER_KEY/GOOGLE_SIGNER_KEY, else
+      3. the ambient client credentials (works only if ADC is itself a key-bearing SA).
+    """
     expiration = datetime.timedelta(days=expiry_days)
     if sign_as:
         from google.auth import impersonated_credentials
@@ -205,6 +236,12 @@ def sign_blob(
         return blob.generate_signed_url(
             version="v4", expiration=expiration, method="GET",
             credentials=target_creds,
+        )
+    signer = _explicit_signer_credentials()
+    if signer is not None:
+        return blob.generate_signed_url(
+            version="v4", expiration=expiration, method="GET",
+            credentials=signer,
         )
     return blob.generate_signed_url(
         version="v4", expiration=expiration, method="GET",

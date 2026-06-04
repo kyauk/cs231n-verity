@@ -126,7 +126,7 @@ export default function Home() {
             <span className="text-primary-foreground font-bold text-sm">AV</span>
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">Adversarial Environment Generator</h1>
+            <h1 className="text-lg font-semibold text-foreground">Verity Platform</h1>
             <p className="text-xs text-muted-foreground">Autonomous Vehicle Safety Validation</p>
           </div>
         </div>

@@ -93,6 +93,29 @@ def _build_parser() -> argparse.ArgumentParser:
                                 "'FRONT,FRONT_LEFT,FRONT_RIGHT,SIDE_LEFT,SIDE_RIGHT'.")
     p_analyze.set_defaults(func=_run_analyze)
 
+    # --- cluster ---------------------------------------------------------------
+    p_cluster = sub.add_parser(
+        "cluster",
+        help="Embed windows and group them by density (UMAP -> HDBSCAN).",
+        description="Run Module 8: Clustering — the embedding-arm peer to analyze. "
+                    "Shares the same ingested windows (Module 1) as the Judge path.",
+    )
+    p_cluster.add_argument("--bucket", required=True,
+                           help="Bucket URI written by `ingest` (same windows analyze reads).")
+    p_cluster.add_argument("--output", required=True,
+                           help="Directory where clusters.json goes.")
+    p_cluster.add_argument("--stub", action="store_true",
+                           help="Use the stub embedder (offline / CI; no NIM/GPU).")
+    p_cluster.add_argument("--cameras", default="FRONT",
+                           help="Comma-separated cameras to embed + concatenate (default: FRONT).")
+    p_cluster.add_argument("--sign-as",
+                           help="Service-account email to impersonate for signed URLs "
+                                "(same as analyze; required if ADC cannot sign v4).")
+    p_cluster.add_argument("--storage-mode", default="canonical",
+                           choices=["canonical", "flat_mp4"],
+                           help="canonical = ingested windows (default). flat_mp4 = flat MP4 bucket.")
+    p_cluster.set_defaults(func=_run_cluster)
+
     # --- report ----------------------------------------------------------------
     p_report = sub.add_parser(
         "report",
@@ -306,6 +329,75 @@ def _write_json_list(path: Path, items: list[Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps([it.to_json() for it in items], indent=2))
     tmp.replace(path)
+
+
+def _build_storage(args: argparse.Namespace, label: str) -> Any:
+    """Build the WindowStorageBase impl for analyze/cluster from CLI args."""
+    from pipeline.modules.storage import FlatMP4Storage, WindowStorage
+    if args.storage_mode == "flat_mp4":
+        if not args.cameras:
+            raise ValueError(
+                f"[pipeline.run {label}] --storage-mode flat_mp4 requires --cameras "
+                f"(comma-separated, e.g. --cameras FRONT)."
+            )
+        cameras = [c.strip() for c in args.cameras.split(",") if c.strip()]
+        return FlatMP4Storage(bucket_uri=args.bucket, cameras=cameras, sign_as=args.sign_as)
+    return WindowStorage(bucket_uri=args.bucket, sign_as=args.sign_as)
+
+
+def _build_clusterer(stub: bool, cameras: list[str]) -> Any:
+    """Construct Module 8: Clustering with the stub or production embedder."""
+    from pipeline.modules.clustering import (
+        Clusterer, ClustererConfig, NIMEmbedClient, StubEmbedClient,
+    )
+    config = ClustererConfig.from_env(cameras=tuple(cameras or ["FRONT"]))
+    embed_client: Any = StubEmbedClient() if stub else NIMEmbedClient()
+    return Clusterer(embed_client=embed_client, config=config)
+
+
+def _run_cluster(args: argparse.Namespace) -> int:
+    from pipeline.interfaces.errors import WindowStorageError
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cameras = [c.strip() for c in (args.cameras or "FRONT").split(",") if c.strip()] or ["FRONT"]
+
+    # --- 1. Storage + window list (same ingested windows analyze reads) ---
+    try:
+        storage = _build_storage(args, "cluster")
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    try:
+        windows = storage.list_windows()
+    except WindowStorageError as exc:
+        print(
+            f"[pipeline.run cluster] cannot list windows at {args.bucket}: {exc}\n"
+            f"  → Check the bucket URI / GCS credentials, and that `ingest` has run.",
+            file=sys.stderr,
+        )
+        return 2
+    if not windows:
+        print(f"[pipeline.run cluster] no windows at {args.bucket} — did you run `ingest`?",
+              file=sys.stderr)
+        return 2
+    print(f"[pipeline.run cluster] found {len(windows)} windows", file=sys.stderr)
+
+    # --- 2. Clustering (Module 8) ----------------------------------------
+    clusterer = _build_clusterer(args.stub, cameras)
+    report = clusterer.run(windows, storage)
+
+    import json
+    out = output_dir / "clusters.json"
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(report.to_json(), indent=2))
+    tmp.replace(out)
+    print(
+        f"[pipeline.run cluster] DONE — {report.n_clusters} clusters, "
+        f"{report.n_noise} noise over {report.n_windows} windows. Output: {out}",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def _run_analyze(args: argparse.Namespace) -> int:

@@ -61,6 +61,7 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   const [pathError, setPathError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   const [probing, setProbing] = useState(false)
+  const [logsJob, setLogsJob] = useState<BatchJob | null>(null)
   const [segmentCount, setSegmentCount] = useState<number | null>(null)
   const [maxSegments, setMaxSegments] = useState<number | 'all'>(5)
 
@@ -88,7 +89,9 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
         setPathError(result.detail)
       }
     } catch {
-      setPathError('Could not reach backend to validate path.')
+      // Distinct from a genuinely invalid path (which returns valid:false with a
+      // reason): this means the ingest service itself didn't respond.
+      setPathError('Ingest service is unreachable — the backend may not be running. This is NOT a problem with your path.')
     } finally {
       setProbing(false)
     }
@@ -364,6 +367,20 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
             <CardTitle className="text-base font-medium">Batch History</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 overflow-auto">
+            {logsJob && (
+              <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium text-destructive">
+                    Logs — {logsJob.label}
+                    {logsJob.stage ? ` (failed at stage: ${logsJob.stage})` : ''}
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={() => setLogsJob(null)}>Close</Button>
+                </div>
+                <pre className="text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto text-muted-foreground font-mono">
+{logsJob.error || 'No error detail recorded for this batch.'}
+                </pre>
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -414,7 +431,12 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                         <span className="text-xs text-muted-foreground">In progress...</span>
                       )}
                       {job.status === 'failed' && (
-                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setLogsJob(job)}
+                        >
                           View Logs
                         </Button>
                       )}
