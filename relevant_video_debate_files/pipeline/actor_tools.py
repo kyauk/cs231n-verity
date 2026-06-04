@@ -277,26 +277,92 @@ SAFETY_TAXONOMY: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
-def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
-    """Ask the Cosmos VLM a targeted follow-up question about the media.
+def _vlm_followup_enabled() -> bool:
+    return os.getenv("REACT_ENABLE_VLM_FOLLOWUP", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
-    Rebuilds the media/video message structure used by the description stage
-    and appends the actor's question as a final text block, then delegates to
-    the shared ``_hf_chat_completion`` entry point.
+
+def _vlm_followup_via_text(
+    question: str,
+    context: DebateContext,
+    reason: str = "disabled",
+) -> str:
+    """Answer a visual follow-up using the prior description (no GPU VLM reload).
+
+    ``reason`` is interpolated into the observation tag so the transcript shows
+    *why* the text-only path was used (``disabled`` when
+    ``REACT_ENABLE_VLM_FOLLOWUP`` is off, ``gpu-failed`` when a GPU attempt
+    raised). This lets a reviewer distinguish "feature off" from
+    "GPU path crashed and fell back".
     """
 
-    question = str(tool_input.get("question", "")).strip()
-    if not question:
-        return "vlm_followup error: missing non-empty 'question' in tool input."
+    from pipeline.stage_describe_and_debate import _nim_text_chat_completion
 
-    if not context.media_refs:
-        return (
-            "vlm_followup error: no media attached to this window; cannot "
-            "answer a visual question."
-        )
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                "You answer targeted questions about a REAL driving scene using "
+                "only the prior scene description and regression rationale below. "
+                "You do not have live video access in this step. Be concise "
+                "(<=80 words). If the text does not support an answer, say what "
+                "is missing rather than guessing."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Scene description:\n{context.scene_description}\n\n"
+                f"Regression-value rationale:\n{context.anomaly_rationale}\n\n"
+                f"Question: {question}"
+            ),
+        },
+    ]
+    try:
+        answer = _nim_text_chat_completion(messages).strip()
+    except Exception as error:  # noqa: BLE001
+        return f"vlm_followup error: {error}"
+    return f"[text-only:{reason}] {answer}"
 
-    # Local import to avoid circular import at module load time.
+
+def _vlm_followup_via_gpu(question: str, context: DebateContext) -> str:
+    """Run a live VLM follow-up against the already-loaded HF VLM.
+
+    Memory hygiene:
+      * Follow-ups sample the video at ``REACT_VLM_FOLLOWUP_FPS`` (default 2)
+        instead of the description's ``COSMOS_HF_VIDEO_FPS`` (default 8).
+        Vision-token count and activation memory scale linearly with frames,
+        so this is the single biggest knob for avoiding fragmentation OOMs on
+        large MoE checkpoints.
+      * Generation length is capped by ``REACT_VLM_FOLLOWUP_MAX_NEW_TOKENS``
+        (default 512) so the per-call KV-cache slab stays small relative to
+        the description stage's 3200-token slab.
+      * ``empty_cache`` + ``gc.collect`` are run immediately before each call
+        to release transient blocks left over from prior generate() runs.
+    """
+
+    import gc
+
     from pipeline.stage_describe_and_debate import _hf_chat_completion
+
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:  # noqa: BLE001
+        pass
+
+    followup_fps = float(
+        os.getenv("REACT_VLM_FOLLOWUP_FPS")
+        or os.getenv("COSMOS_HF_VIDEO_FPS", "8")
+    )
 
     media_blocks: list[dict[str, Any]] = []
     for media_ref in context.media_refs:
@@ -304,7 +370,7 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
         lowered = media_ref.lower()
         if lowered.endswith((".mp4", ".mov", ".mkv", ".avi", ".webm")):
             media_blocks.append(
-                {"type": "video", "video": abs_path, "fps": context.video_fps}
+                {"type": "video", "video": abs_path, "fps": followup_fps}
             )
         elif lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
             media_blocks.append({"type": "image", "image": abs_path})
@@ -316,6 +382,7 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
         )
 
     media_blocks.append({"type": "text", "text": question})
+    max_tokens = int(os.getenv("REACT_VLM_FOLLOWUP_MAX_NEW_TOKENS", "512"))
 
     messages: list[dict[str, Any]] = [
         {
@@ -323,26 +390,64 @@ def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
             "content": (
                 "You are a vision-language assistant answering targeted "
                 "follow-up questions about a REAL recorded autonomous-driving "
-                "scene. The video is genuine fleet footage - do NOT speculate "
-                "about whether it is fake, edited, or staged. Do NOT explain "
-                "sudden motion, debris, or collisions as glitches, unrealistic "
-                "physics, or rendering errors; infer real-world causes or say "
-                "the precursor is not visible. Describe what you actually see: "
-                "agents (vehicles, pedestrians, cyclists, infrastructure), "
-                "their positions and trajectories, the likely cause of any "
-                "incident, and environmental conditions. "
-                "Answer concisely (<=80 words) grounded strictly in what is "
-                "visible. If a specific detail is not visually evident, say "
-                "so explicitly rather than guessing."
+                "scene. Answer concisely (<=80 words) grounded in what is visible."
             ),
         },
         {"role": "user", "content": media_blocks},
     ]
 
+    return _hf_chat_completion(
+        messages=messages,
+        max_new_tokens_override=max_tokens,
+    ).strip()
+
+
+def vlm_followup(tool_input: dict[str, Any], context: DebateContext) -> str:
+    """Ask a targeted follow-up about the scene (text-only by default; optional GPU VLM)."""
+
+    question = str(tool_input.get("question", "")).strip()
+    if not question:
+        return "vlm_followup error: missing non-empty 'question' in tool input."
+
+    if not context.media_refs and not context.scene_description.strip():
+        return (
+            "vlm_followup error: no media or prior scene description available."
+        )
+
+    if not _vlm_followup_enabled():
+        return _vlm_followup_via_text(question, context, reason="disabled")
+
     try:
-        return _hf_chat_completion(messages=messages).strip()
+        import torch  # type: ignore[import-not-found]
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        return _vlm_followup_via_gpu(question, context)
     except Exception as error:  # noqa: BLE001
-        return f"vlm_followup error: {error}"
+        # Any GPU-side failure (OOM, missing weights, processor mismatch,
+        # video decode error, transformers import failure, ...) falls back to
+        # text-only so the actor still gets a usable Observation. Surface the
+        # underlying error in the tag so the transcript shows what broke.
+        error_text = str(error)
+        lowered = error_text.lower()
+        if "out of memory" in lowered or "cuda" in lowered:
+            short_reason = "gpu-oom"
+        else:
+            short_reason = "gpu-failed"
+        print(
+            f"[pipeline] vlm_followup GPU path failed ({short_reason}): "
+            f"{error_text}",
+            flush=True,
+        )
+        text_answer = _vlm_followup_via_text(
+            question, context, reason=short_reason
+        )
+        truncated = error_text if len(error_text) <= 200 else error_text[:197] + "..."
+        return f"{text_answer} (GPU VLM error: {truncated})"
 
 
 def safety_taxonomy_lookup(
@@ -487,7 +592,8 @@ def execute_tool(
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "vlm_followup": (
-        "Ask a targeted visual question about the video/image. "
+        "Ask a targeted question about the scene (answered from the prior "
+        "scene description unless REACT_ENABLE_VLM_FOLLOWUP=1). "
         'Input: {"question": "your question"}'
     ),
     "safety_taxonomy_lookup": (

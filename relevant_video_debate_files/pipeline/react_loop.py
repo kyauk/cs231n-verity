@@ -72,6 +72,10 @@ Action Input: <JSON object - tool input dict OR your final structured output>
 
 When you have enough information, use Action: finish and put your final answer as a JSON object in Action Input.
 
+Action: finish is ALWAYS valid (even when you also have other tools). Do not put markdown separators or extra text after the action name.
+
+Never use Action: None, Action: null, or a blank action. When you are done, you MUST use Action: finish with a non-empty JSON object.
+
 Do NOT include any text outside of this Thought/Action/Action Input format.
 """.strip()
 
@@ -79,6 +83,68 @@ Do NOT include any text outside of this Thought/Action/Action Input format.
 _THOUGHT_RE = re.compile(r"Thought:\s*(.+?)(?=\nAction:)", re.DOTALL)
 _ACTION_RE = re.compile(r"Action:\s*(.+?)(?=\nAction Input:)", re.DOTALL)
 _ACTION_INPUT_RE = re.compile(r"Action Input:\s*(.+)", re.DOTALL)
+
+_INVALID_ACTION_NAMES = frozenset({"none", "null", "n/a", "na", ""})
+
+# Action Input keys that belong to tool calls, not actor final answers.
+_TOOL_INPUT_ONLY_KEYS = frozenset({"question", "query", "scenario_description"})
+
+
+def _normalize_action_name(action: str) -> str:
+    """Return the canonical action token (e.g. ``finish``, ``vlm_followup``).
+
+    Small models often append markdown or transcript separators after the
+    action name (``finish ---``, ``finish | Action Input:``). Strip those so
+    ``finish`` is recognized even when the raw ``Action:`` line is messy.
+    """
+
+    text = (action or "").strip()
+    if not text:
+        return ""
+    # Keep only the first alphanumeric/underscore token.
+    match = re.match(r"([A-Za-z_][\w-]*)", text)
+    if match:
+        return match.group(1).lower().replace("-", "_")
+    return text.split()[0].lower()
+
+
+def _payload_has_content(payload: dict[str, Any]) -> bool:
+    """True when ``payload`` contains at least one non-empty value."""
+
+    for value in payload.values():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, dict)) and not value:
+            continue
+        return True
+    return False
+
+
+def _payload_matches_required_keys(
+    payload: dict[str, Any],
+    required_keys: tuple[str, ...],
+) -> bool:
+    if not required_keys:
+        return _payload_has_content(payload)
+    return all(
+        key in payload and payload[key] not in (None, "", [])
+        for key in required_keys
+    )
+
+
+def _looks_like_tool_input(payload: dict[str, Any]) -> bool:
+    """Heuristic: reject salvage of ``{question: ...}``-style tool payloads."""
+
+    if not payload:
+        return False
+    keys = set(payload.keys())
+    if keys and keys <= _TOOL_INPUT_ONLY_KEYS:
+        return True
+    if len(keys) == 1 and "question" in keys:
+        return True
+    return False
 
 
 def _build_tool_block(available_tools: list[str]) -> str:
@@ -195,6 +261,46 @@ def _extract_first_json_object(candidate: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _salvage_final_output(
+    steps: list[ActorStep],
+    last_raw_output: str,
+    required_output_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    """Best-effort structured output when max steps hit without a valid finish."""
+
+    for step in reversed(steps):
+        if step.tool_call is None or step.tool_call.tool_name != "finish":
+            continue
+        payload = step.tool_call.tool_input
+        if not isinstance(payload, dict) or not _payload_has_content(payload):
+            continue
+        if _looks_like_tool_input(payload):
+            continue
+        if _payload_matches_required_keys(payload, required_output_keys):
+            return dict(payload)
+
+    salvage_candidate = last_raw_output
+    _thought, action, action_input_raw = _parse_react_response(last_raw_output)
+    if action_input_raw:
+        salvage_candidate = action_input_raw
+    extracted = _extract_first_json_object(salvage_candidate)
+    if extracted is None:
+        return {}
+    try:
+        parsed = json.loads(extracted)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    if _looks_like_tool_input(parsed):
+        return {}
+    if required_output_keys and not _payload_matches_required_keys(
+        parsed, required_output_keys
+    ):
+        return {}
+    return parsed
+
+
 def run_actor(
     actor_name: str,
     system_prompt: str,
@@ -203,6 +309,7 @@ def run_actor(
     context: DebateContext,
     max_steps: int,
     llm_call: Callable[[list[dict[str, Any]]], str],
+    required_output_keys: tuple[str, ...] = (),
 ) -> ActorContribution:
     """Run an actor's ReAct loop and return the structured contribution.
 
@@ -225,12 +332,19 @@ def run_actor(
     last_raw_output = ""
 
     for _step_index in range(max_steps):
-        try:
-            raw_output = llm_call(messages)
-        except Exception as error:  # noqa: BLE001
+        raw_output = ""
+        llm_error: Exception | None = None
+        for llm_attempt in range(2):
+            try:
+                raw_output = llm_call(messages)
+                llm_error = None
+                break
+            except Exception as error:  # noqa: BLE001
+                llm_error = error
+        if llm_error is not None:
             steps.append(
                 ActorStep(
-                    thought=f"[llm_call raised exception: {error}]",
+                    thought=f"[llm_call raised exception: {llm_error}]",
                     tool_call=None,
                     observation=None,
                 )
@@ -263,7 +377,29 @@ def run_actor(
             )
             continue
 
-        if action.lower() == "finish":
+        action_normalized = _normalize_action_name(action)
+        if action_normalized in _INVALID_ACTION_NAMES:
+            observation = (
+                "Invalid action. When you are done, use Action: finish with your "
+                f"final JSON object. Otherwise choose one of: {available_tools}"
+            )
+            steps.append(
+                ActorStep(
+                    thought=thought or "",
+                    tool_call=None,
+                    observation=observation,
+                )
+            )
+            messages.append({"role": "assistant", "content": raw_output})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Observation: {observation}\n\nContinue with your next Thought.",
+                }
+            )
+            continue
+
+        if action_normalized == "finish":
             parsed_input, parse_error = _parse_action_input_json(action_input_raw or "")
             if parsed_input is None:
                 steps.append(
@@ -286,6 +422,68 @@ def run_actor(
                 )
                 continue
 
+            if not _payload_has_content(parsed_input):
+                keys_hint = (
+                    f" Required keys: {list(required_output_keys)}."
+                    if required_output_keys
+                    else ""
+                )
+                observation = (
+                    "Finish payload must be a non-empty JSON object with your "
+                    f"final answer.{keys_hint}"
+                )
+                steps.append(
+                    ActorStep(
+                        thought=thought or "",
+                        tool_call=ToolCall(tool_name="finish", tool_input={}),
+                        observation=observation,
+                    )
+                )
+                messages.append({"role": "assistant", "content": raw_output})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Observation: {observation}\n\n"
+                            "Return Action: finish with the complete JSON object "
+                            "in Action Input (not an empty {{}})."
+                        ),
+                    }
+                )
+                continue
+
+            if required_output_keys and not _payload_matches_required_keys(
+                parsed_input, required_output_keys
+            ):
+                missing = [
+                    key
+                    for key in required_output_keys
+                    if key not in parsed_input
+                    or parsed_input[key] in (None, "", [])
+                ]
+                observation = (
+                    "Finish payload is missing required keys or has empty values: "
+                    f"{missing}. Required: {list(required_output_keys)}."
+                )
+                steps.append(
+                    ActorStep(
+                        thought=thought or "",
+                        tool_call=ToolCall(tool_name="finish", tool_input=parsed_input),
+                        observation=observation,
+                    )
+                )
+                messages.append({"role": "assistant", "content": raw_output})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Observation: {observation}\n\n"
+                            "Return Action: finish with the full JSON object."
+                        ),
+                    }
+                )
+                continue
+
             final_output = parsed_input
             steps.append(
                 ActorStep(
@@ -296,9 +494,12 @@ def run_actor(
             )
             break
 
-        if action not in available_tools:
+        if action_normalized not in {_normalize_action_name(t) for t in available_tools}:
+            tool_list = list(available_tools)
+            if "finish" not in tool_list:
+                tool_list = [*tool_list, "finish"]
             observation = (
-                f"Unknown tool: {action}. Available tools: {available_tools}"
+                f"Unknown tool: {action}. Available tools: {tool_list}"
             )
             steps.append(
                 ActorStep(
@@ -316,15 +517,16 @@ def run_actor(
             )
             continue
 
+        tool_name = action_normalized
         parsed_input, parse_error = _parse_action_input_json(action_input_raw or "")
         if parsed_input is None:
             observation = (
-                f"Could not parse Action Input for tool '{action}': {parse_error}"
+                f"Could not parse Action Input for tool '{tool_name}': {parse_error}"
             )
             steps.append(
                 ActorStep(
                     thought=thought or "",
-                    tool_call=ToolCall(tool_name=action, tool_input={}),
+                    tool_call=ToolCall(tool_name=tool_name, tool_input={}),
                     observation=observation,
                 )
             )
@@ -337,11 +539,11 @@ def run_actor(
             )
             continue
 
-        observation = execute_tool(action, parsed_input, context)
+        observation = execute_tool(tool_name, parsed_input, context)
         steps.append(
             ActorStep(
                 thought=thought or "",
-                tool_call=ToolCall(tool_name=action, tool_input=parsed_input),
+                tool_call=ToolCall(tool_name=tool_name, tool_input=parsed_input),
                 observation=observation,
             )
         )
@@ -354,21 +556,9 @@ def run_actor(
         )
 
     if not final_output and last_raw_output:
-        # Max steps hit without an explicit finish: salvage any JSON we can
-        # from the last raw output so downstream consumers get a best-effort
-        # structured answer.
-        salvage_candidate = last_raw_output
-        _thought, action, action_input_raw = _parse_react_response(last_raw_output)
-        if action_input_raw:
-            salvage_candidate = action_input_raw
-        extracted = _extract_first_json_object(salvage_candidate)
-        if extracted is not None:
-            try:
-                parsed = json.loads(extracted)
-                if isinstance(parsed, dict):
-                    final_output = parsed
-            except json.JSONDecodeError:
-                final_output = {}
+        final_output = _salvage_final_output(
+            steps, last_raw_output, required_output_keys
+        )
 
     return ActorContribution(
         actor_name=actor_name,
