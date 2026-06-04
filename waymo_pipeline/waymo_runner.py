@@ -608,6 +608,46 @@ def video_proxy(segment_id: str, window_idx: int, request: Request, camera: str 
     )
 
 
+_SEGMENT_VIDEO_BUCKET = os.environ.get("SEGMENT_VIDEO_BUCKET", "nvidia-adr-waymo-segment-videos")
+
+
+@app.get("/segment-video/{segment_id}")
+def segment_video(segment_id: str, request: Request, camera: str = "FRONT") -> Response:
+    """Stream a RAW segment MP4 (not a window clip) from GCS via ADC, with Range.
+
+    The salience scenes reference whole segments at
+    gs://{SEGMENT_VIDEO_BUCKET}/segments/{seg}/{seg}_{camera}.mp4 — a different
+    layout than the windows/ clips video_proxy serves.
+    """
+    import re  # noqa: PLC0415
+    from google.cloud import storage  # noqa: PLC0415
+
+    blob_name = f"segments/{segment_id}/{segment_id}_{camera}.mp4"
+    project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    try:
+        blob = storage.Client(project=project).bucket(_SEGMENT_VIDEO_BUCKET).blob(blob_name)
+        blob.reload()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"detail": f"segment video not found: {blob_name} ({exc})"}, status_code=404)
+
+    size = blob.size or 0
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and size:
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        start = int(m.group(1)) if m else 0
+        end = int(m.group(2)) if (m and m.group(2)) else size - 1
+        end = min(end, size - 1)
+        data = blob.download_as_bytes(start=start, end=end)
+        return Response(content=data, status_code=206, media_type="video/mp4",
+                        headers={"Content-Range": f"bytes {start}-{end}/{size}",
+                                 "Accept-Ranges": "bytes", "Content-Length": str(end - start + 1),
+                                 "Cache-Control": "public, max-age=3600"})
+    data = blob.download_as_bytes()
+    return Response(content=data, status_code=200, media_type="video/mp4",
+                    headers={"Accept-Ranges": "bytes", "Content-Length": str(len(data)),
+                             "Cache-Control": "public, max-age=3600"})
+
+
 # ---------------------------------------------------------------------------
 # Flagged scenarios  (Dashboard tab)
 # ---------------------------------------------------------------------------

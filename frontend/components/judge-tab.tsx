@@ -65,22 +65,26 @@ function sceneKey(s: JudgeMotivatingScene): string {
 function ScoreBadgeRow({ scores }: { scores: JudgeProposalRow['scores'] }) {
   return (
     <div className="flex gap-1.5 flex-wrap">
-      <Badge variant="outline" className="text-xs font-mono">
-        N {scores.novelty_score.toFixed(2)} (~{Math.round(Math.exp(scores.novelty_score))}× rarer)
-      </Badge>
-      <Badge
-        variant="secondary"
-        className="text-xs font-mono bg-primary/10 text-primary border-primary/20"
-      >
-        P {Math.round(scores.plausibility_score * 100)}%
-      </Badge>
+      {scores.novelty_score !== 0 && (
+        <Badge variant="outline" className="text-xs font-mono">
+          N {Math.round(Math.exp(scores.novelty_score))}× rarer
+        </Badge>
+      )}
+      {scores.plausibility_score !== 1 && (
+        <Badge
+          variant="secondary"
+          className="text-xs font-mono bg-primary/10 text-primary border-primary/20"
+        >
+          P {Math.round(scores.plausibility_score * 100)}%
+        </Badge>
+      )}
       {scores.frontier_difficulty_score !== null && (
         <Badge variant="outline" className="text-xs font-mono bg-amber-100 text-amber-700 border-amber-200">
           D {Math.round(scores.frontier_difficulty_score * 100)}%
         </Badge>
       )}
       <Badge variant="outline" className="text-xs font-mono bg-blue-50 text-blue-600 border-blue-200">
-        R {scores.final_rank_score.toFixed(2)}
+        R {scores.final_rank_score.toFixed(1)}
       </Badge>
     </div>
   )
@@ -90,13 +94,13 @@ function ScoreBadgeRow({ scores }: { scores: JudgeProposalRow['scores'] }) {
 function ScoreLegend() {
   return (
     <div className="text-xs text-muted-foreground leading-relaxed">
-      <span className="font-mono">N</span> Novelty — e^N× rarer than chance (N 1≈3×, 2≈7×, 3≈20×)
+      <span className="font-mono">N</span> — how much rarer than chance (e.g. 3×)
       {' · '}
-      <span className="font-mono">P</span> Plausibility (physically possible, 0–100%)
+      <span className="font-mono">P</span> — plausibility (0–100%)
       {' · '}
-      <span className="font-mono">D</span> Difficulty (challenges the AV stack, 0–100%)
+      <span className="font-mono">D</span> — difficulty (0–100%)
       {' · '}
-      <span className="font-mono">R</span> Final rank (N×0.4 + P×0.3 + D×0.3; higher = higher priority)
+      <span className="font-mono">R</span> — overall priority (0–5)
     </div>
   )
 }
@@ -108,28 +112,27 @@ function buildScenario(constituents: string[]): string {
   const byPrefix: Record<string, string[]> = {}
   for (const c of constituents) {
     const i = c.indexOf(':')
-    const p = i === -1 ? c : c.slice(0, i)
-    const v = i === -1 ? c : c.slice(i + 1)
+    const p = i === -1 ? '' : c.slice(0, i)
+    const v = (i === -1 ? c : c.slice(i + 1)).replace(/_/g, ' ')
     ;(byPrefix[p] ||= []).push(v)
   }
-  const one = (p: string) => byPrefix[p]?.[0]
-  const h = (s?: string) => (s ? s.replace(/_/g, ' ') : s)
+  // Handles BOTH the legacy fixed-schema prefixes and the new emergent axes.
+  const all = (...ps: string[]) => ps.flatMap((p) => byPrefix[p] || [])
+  const parts: string[] = []
 
-  const todMap: Record<string, string> = { day: 'in the daytime', night: 'at night', dusk_dawn: 'at dusk or dawn' }
-  const roadMap: Record<string, string> = { straight: 'on a straight road', intersection: 'at an intersection', curve: 'on a curving road', highway_ramp: 'on a highway ramp', parking_lot: 'in a parking lot' }
-  const tcMap: Record<string, string> = { traffic_light: 'at a traffic light', stop_sign: 'at a stop sign', yield_sign: 'at a yield sign', none: 'with no traffic control', construction_signals: 'near construction signals' }
-
-  const ego = one('ego_task') ? `The ego vehicle is ${h(one('ego_task'))}` : 'The ego vehicle is driving'
-  const road = one('road_geometry') ? (roadMap[one('road_geometry')!] ?? `on a ${h(one('road_geometry'))} road`) : ''
-  const tod = one('time_of_day') ? (todMap[one('time_of_day')!] ?? `during ${h(one('time_of_day'))}`) : ''
-  const env = [one('weather') ? `${h(one('weather'))} weather` : '', one('lighting') ? `${h(one('lighting'))} lighting` : ''].filter(Boolean).join(' with ')
-  const tc = one('traffic_control') ? (tcMap[one('traffic_control')!] ?? `with ${h(one('traffic_control'))}`) : ''
-  const agents = byPrefix['agents']?.length ? `with ${byPrefix['agents'].map(h).join(', ')} present` : ''
-  const conds = byPrefix['conditions']?.length ? `under ${byPrefix['conditions'].map(h).join(', ')}` : ''
-
-  const lead = [ego, road].filter(Boolean).join(' ')
-  const tail = [tod, env, tc, agents, conds].filter(Boolean).join(', ')
-  return tail ? `${lead}, ${tail}.` : `${lead}.`
+  const ego = all('ego_maneuver', 'ego_task')
+  parts.push(ego.length ? `The ego vehicle is ${ego.join(' and ')}` : 'The ego vehicle is driving')
+  const road = all('road', 'road_geometry')
+  if (road.length) parts.push(`on/at ${road.join(', ')}`)
+  const time = all('time', 'time_of_day', 'lighting')
+  if (time.length) parts.push(`during ${time.join(', ')}`)
+  if (all('weather').length) parts.push(`in ${all('weather').join(', ')}`)
+  if (all('agents').length) parts.push(`with ${all('agents').join(', ')}`)
+  if (all('interactions').length) parts.push(`involving ${all('interactions').join(', ')}`)
+  if (all('conditions', 'traffic_control').length) parts.push(`— ${all('conditions', 'traffic_control').join(', ')}`)
+  const leftover = all('') // untyped atoms
+  if (leftover.length) parts.push(`(${leftover.join(', ')})`)
+  return parts.join(' ').replace(/\s+—/, ' —') + '.'
 }
 
 // ---------------------------------------------------------------------------
@@ -582,10 +585,17 @@ export function JudgeTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-medium">Scenario</CardTitle>
-            <p className="text-xs text-muted-foreground">Plain-language description of the scenario to generate / collect (derived from the tags below)</p>
+            <p className="text-xs text-muted-foreground">Vivid description of the observed environment — detailed enough to recreate the scene in a simulator</p>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-foreground">{buildScenario(selectedProposal.constituents)}</p>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
+              {selectedProposal.plausibility_justification?.trim()
+                ? selectedProposal.plausibility_justification
+                : buildScenario(selectedProposal.constituents)}
+            </p>
+            <p className="text-xs text-muted-foreground border-t pt-2">
+              <span className="font-medium">Tag summary:</span> {buildScenario(selectedProposal.constituents)}
+            </p>
           </CardContent>
         </Card>
 
@@ -604,18 +614,6 @@ export function JudgeTab() {
             </div>
             <ScoreBadgeRow scores={selectedProposal.scores} />
             <ScoreLegend />
-            <div>
-              <div className="text-xs font-medium text-foreground mb-1">
-                Plausibility assessment{' '}
-                <span className="font-normal text-muted-foreground">
-                  — the scorer's text-model reasoning about whether these
-                  conditions can co-occur. Not a description of an observed clip.
-                </span>
-              </div>
-              <div className="bg-muted/50 rounded-lg px-4 py-3 text-sm text-muted-foreground italic">
-                "{selectedProposal.plausibility_justification}"
-              </div>
-            </div>
           </CardContent>
         </Card>
 

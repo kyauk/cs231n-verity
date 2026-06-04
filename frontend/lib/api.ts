@@ -20,11 +20,15 @@ import type {
   JudgeSessionSummary,
 } from './types'
 
+// Default to RELATIVE (empty base) so every call goes through the single Next
+// origin and its proxy rewrites. Absolute backend URLs break under port-
+// forwarding — an absolute backend port resolves to the USER's machine, not the
+// server's. Override with NEXT_PUBLIC_* only for split-origin deployments.
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+  process.env.NEXT_PUBLIC_API_URL ?? ''
 
 const JUDGE_API_URL =
-  process.env.NEXT_PUBLIC_JUDGE_API_URL ?? 'http://localhost:8001'
+  process.env.NEXT_PUBLIC_JUDGE_API_URL ?? ''
 
 export class ApiError extends Error {
   status: number
@@ -269,7 +273,8 @@ export async function runAnalysisStream(
 /* ------------------------------------------------------------------ */
 
 export async function fetchJudgeProposals(): Promise<JudgeProposalRow[]> {
-  const response = await fetch(`${JUDGE_API_URL}/judge/proposals`, { cache: 'no-store' })
+  // cache-buster query param defeats any intermediary/tunnel cache, on top of no-store
+  const response = await fetch(`${JUDGE_API_URL}/judge/proposals?_t=${Date.now()}`, { cache: 'no-store' })
   return parseResponse<JudgeProposalRow[]>(response)
 }
 

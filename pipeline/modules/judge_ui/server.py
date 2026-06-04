@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
@@ -372,28 +372,65 @@ def get_video_url(
     The frontend calls this on initial load and again on video.onerror
     (capped at 2 retries) to handle expired URLs.
     """
-    if _storage is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Video storage not configured. Set JUDGE_BUCKET_URI env var.",
-        )
-    try:
-        url = _storage.get_window_video_url(
-            segment_id=segment_id,
-            window_idx=window_idx,
-            camera=camera,
-            ttl_seconds=config.VIDEO_URL_TTL_SECONDS,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Storage error: {exc}",
-        ) from exc
+    # WindowStorage clips (the canonical windows/ layout) when configured...
+    if _storage is not None:
+        try:
+            url = _storage.get_window_video_url(
+                segment_id=segment_id,
+                window_idx=window_idx,
+                camera=camera,
+                ttl_seconds=config.VIDEO_URL_TTL_SECONDS,
+            )
+            return VideoUrlResponse(url=url, generated_at=datetime.now(timezone.utc).isoformat())
+        except Exception:  # noqa: BLE001 — fall through to the raw-segment proxy
+            pass
 
+    # ...otherwise (e.g. salience scenes) stream the RAW segment from this server's
+    # own /judge/segment-video route — already covered by the /judge/:path* Next
+    # rewrite, so no new proxy config is needed. No signed URL / WindowStorage.
     return VideoUrlResponse(
-        url=url,
+        url=f"/judge/segment-video/{segment_id}?camera={camera}",
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+_SEGMENT_VIDEO_BUCKET = os.environ.get("SEGMENT_VIDEO_BUCKET", "nvidia-adr-waymo-segment-videos")
+
+
+@app.get("/judge/segment-video/{segment_id}")
+def judge_segment_video(segment_id: str, request: Request, camera: str = "FRONT") -> Response:
+    """Stream a raw segment MP4 from GCS via ADC, with HTTP Range (browser seek).
+
+    Lives at gs://{SEGMENT_VIDEO_BUCKET}/segments/{seg}/{seg}_{camera}.mp4. Served
+    here (not via WindowStorage) because salience scenes are whole segments.
+    """
+    import re  # noqa: PLC0415
+    from google.cloud import storage  # noqa: PLC0415
+
+    blob_name = f"segments/{segment_id}/{segment_id}_{camera}.mp4"
+    project = os.environ.get("GCS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    try:
+        blob = storage.Client(project=project).bucket(_SEGMENT_VIDEO_BUCKET).blob(blob_name)
+        blob.reload()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail=f"segment video not found: {blob_name} ({exc})")
+
+    size = blob.size or 0
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and size:
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        start = int(m.group(1)) if m else 0
+        end = int(m.group(2)) if (m and m.group(2)) else size - 1
+        end = min(end, size - 1)
+        data = blob.download_as_bytes(start=start, end=end)
+        return Response(content=data, status_code=206, media_type="video/mp4",
+                        headers={"Content-Range": f"bytes {start}-{end}/{size}",
+                                 "Accept-Ranges": "bytes", "Content-Length": str(end - start + 1),
+                                 "Cache-Control": "public, max-age=3600"})
+    data = blob.download_as_bytes()
+    return Response(content=data, status_code=200, media_type="video/mp4",
+                    headers={"Accept-Ranges": "bytes", "Content-Length": str(len(data)),
+                             "Cache-Control": "public, max-age=3600"})
 
 
 @app.post("/judge/ratings")

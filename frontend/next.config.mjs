@@ -26,6 +26,7 @@ const nextConfig = {
       { source: '/scenarios', destination: `${API_ORIGIN}/scenarios` },
       { source: '/scenes/:path*', destination: `${API_ORIGIN}/scenes/:path*` },
       { source: '/video/:path*', destination: `${API_ORIGIN}/video/:path*` },
+      { source: '/segment-video/:path*', destination: `${API_ORIGIN}/segment-video/:path*` },
       { source: '/analysis/:path*', destination: `${API_ORIGIN}/analysis/:path*` },
       // --- :8001 judge_ui (Judge tab) ---
       { source: '/judge/:path*', destination: `${JUDGE_ORIGIN}/judge/:path*` },

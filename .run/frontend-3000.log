@@ -310,3 +310,26 @@ Error: connect ECONNREFUSED 127.0.0.1:8000
  GET / 200 in 38ms (next.js: 3ms, application-code: 36ms)
  GET / 200 in 34ms (next.js: 1754µs, application-code: 33ms)
 ✓ Compiled in 46ms
+ GET / 200 in 53ms (next.js: 4ms, application-code: 49ms)
+ GET / 200 in 41ms (next.js: 3ms, application-code: 39ms)
+ GET /gpu 404 in 35ms (next.js: 11ms, application-code: 25ms)
+ GET / 200 in 36ms (next.js: 1908µs, application-code: 35ms)
+ GET / 200 in 44ms (next.js: 1819µs, application-code: 42ms)
+ GET / 200 in 31ms (next.js: 1691µs, application-code: 30ms)
+ GET / 200 in 46ms (next.js: 2ms, application-code: 44ms)
+ GET /icon.svg 404 in 47ms (next.js: 7ms, application-code: 40ms)
+ GET /icon-dark-32x32.png 404 in 27ms (next.js: 2ms, application-code: 25ms)
+ GET / 200 in 59ms (next.js: 4ms, application-code: 55ms)
+ GET / 200 in 32ms (next.js: 1452µs, application-code: 30ms)
+ GET / 200 in 35ms (next.js: 1527µs, application-code: 33ms)
+✓ Compiled in 40ms
+✓ Compiled in 38ms
+✓ Compiled in 48ms
+ GET / 200 in 37ms (next.js: 3ms, application-code: 35ms)
+ GET / 200 in 37ms (next.js: 1710µs, application-code: 35ms)
+ GET / 200 in 55ms (next.js: 3ms, application-code: 52ms)
+ GET / 200 in 46ms (next.js: 2ms, application-code: 44ms)
+ GET / 200 in 37ms (next.js: 2ms, application-code: 35ms)
+ GET / 200 in 36ms (next.js: 2ms, application-code: 34ms)
+ GET / 200 in 50ms (next.js: 2ms, application-code: 48ms)
+⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
