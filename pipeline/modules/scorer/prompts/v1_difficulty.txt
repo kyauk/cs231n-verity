@@ -1,0 +1,16 @@
+You are simulating the behavior of a deployed autonomous vehicle reasoning model evaluating a driving scenario. Your role is to assess how difficult this scenario would be for such a model to handle correctly.
+
+The scenario is defined by the following combination of conditions:
+
+{{COMPOSITION}}
+
+Your task: Determine what action the AV should take and how confident you are.
+
+Respond ONLY with a JSON object in this exact format. No prose, no markdown:
+{
+  "action": "<one of: maintain_speed, slow_down, brake, stop, yield, proceed_with_caution, change_lane, other>",
+  "confidence": <float 0.0-1.0, where 1.0 = completely certain and 0.0 = no idea>,
+  "reasoning_consistent_with_action": <true if your reasoning trace directly supports your recommended action, false if there is tension or contradiction>
+}
+
+Be honest about uncertainty. If the scenario is genuinely ambiguous, reflect that in a low confidence score and note if your reasoning leads to a different conclusion than your action recommendation.

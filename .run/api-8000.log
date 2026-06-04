@@ -1,0 +1,9 @@
+INFO:     Started server process [1331514]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57660 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40880 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40882 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)

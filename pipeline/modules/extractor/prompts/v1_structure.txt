@@ -1,0 +1,41 @@
+You convert a free-form AV scene analysis into structured, typed descriptors. You do NOT invent anything — every descriptor must be grounded in the analysis text.
+
+For each notable element in the analysis, emit one descriptor object with:
+  - "axis": exactly one of:
+        agents          (an object: vehicle, pedestrian, cyclist, bus, ...)
+        ego_maneuver    (what the ego vehicle is doing)
+        interactions    (a relation: yielding, cut-in, occluded crossing, following, ...)
+        conditions      (a safety-relevant scene condition)
+        road            (geometry / layout)
+        weather         (only if explicitly described)
+        time            (only if explicitly described)
+  - "text": a short, canonical phrase, 1-5 words, lowercase (e.g. "occluded pedestrian
+            emergence", "unprotected left turn", "stopped bus"). Prefer the generic,
+            reusable phrasing.
+  - "span": the EXACT sentence (verbatim substring) from the analysis that justifies it.
+  - "salience": a number 0.0-1.0 — how OPERATIONALLY CRITICAL this element makes the scene
+            for an automated driver. Calibrate honestly:
+              0.0-0.2  routine furniture: clear weather, daytime, maintaining lane,
+                       normal traffic flow, clearly-marked road, "no activity observed".
+              0.3-0.6  moderate: parked cars to track, a turn, moderate traffic, a stop
+                       sign, a pedestrian crossing normally at a crosswalk, reduced
+                       visibility/traction (rain, fog, night, wet road).
+              0.7-1.0  genuinely hard — reserve for ACTIVE, IMMEDIATE difficulty:
+                       an occluded or SUDDENLY-emerging VRU, a conflict / near-miss,
+                       ambiguous right-of-way, an agent behaving unpredictably.
+            **Most descriptors are routine — most salience values should be LOW.** A normal
+            pedestrian crossing or rainy weather is MODERATE (0.3-0.5), NOT high — reserve
+            0.7+ for genuine, active hazard. Do not inflate; a scene the analysis called
+            routine should have only low-salience descriptors.
+
+Rules:
+  - Put behaviors/intent and relations under "interactions", not "agents".
+  - One concept per descriptor. Split compound observations. Do not duplicate.
+
+Return ONLY a JSON object:
+{"descriptors": [{"axis": "...", "text": "...", "span": "...", "salience": 0.0}, ...]}
+
+ANALYSIS:
+{{REASONING}}
+
+Respond in ENGLISH ONLY.

@@ -1,0 +1,18 @@
+You are an autonomous vehicle safety expert assessing whether a scenario is physically and behaviorally plausible — meaning it could realistically occur in real-world driving.
+
+The scenario is defined by the following combination of conditions:
+
+{{COMPOSITION}}
+
+Your task: Rate the plausibility of this scenario on a scale from 0.0 to 1.0, where:
+  1.0 = Fully plausible — these conditions commonly co-occur in real driving
+  0.5 = Uncertain — conditions could co-occur but it would be unusual
+  0.0 = Implausible — these conditions cannot realistically co-occur
+
+Consider:
+- Physical consistency: can these conditions exist simultaneously? (e.g., fog + low-sun glare is contradictory)
+- Behavioral consistency: is the ego task coherent given the environment? (e.g., reversing on a freeway ramp is implausible)
+- Temporal consistency: can all conditions occur at the same time of day / weather?
+
+Respond ONLY with a JSON object in this exact format. No prose, no markdown:
+{"score": <float 0.0-1.0>, "justification": "<one sentence explaining the rating>"}

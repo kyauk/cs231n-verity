@@ -25,11 +25,19 @@ import {
 import type { BatchJob } from '@/lib/types'
 import { probePath } from '@/lib/api'
 
+type BatchMode = 'cluster' | 'reason' | 'both'
+
 interface IngestTabProps {
   batchJobs: BatchJob[]
-  onLaunchBatch: (dataSourceUri: string, label: string, region: string, maxSegments: number) => Promise<void>
+  onLaunchBatch: (dataSourceUri: string, label: string, region: string, maxSegments: number, mode: BatchMode) => Promise<void>
   onViewClusterSpace: (batchId: string) => void
 }
+
+const BATCH_MODES: { value: BatchMode; label: string; detail: string }[] = [
+  { value: 'cluster', label: 'Cluster & Analyze', detail: 'Embed + cluster the windows (Embed1 / Cluster Space).' },
+  { value: 'reason', label: 'Generate Novel Scenarios', detail: 'Discovery → Judge proposals (Reason1).' },
+  { value: 'both', label: 'Both', detail: 'Cluster first, then auto-swap the GPU to reasoning.' },
+]
 
 const REGIONS = [
   { value: 'US-West', label: 'US West (Phoenix, SF, LA)' },
@@ -40,22 +48,16 @@ const REGIONS = [
 
 const DATASET_EXAMPLES = [
   {
-    name: 'Waymo Open Dataset',
+    name: 'Waymo Open Dataset v2',
     uri: 'gs://waymo_open_dataset_v_2_0_1/validation/camera_image',
     auth: 'gcloud auth application-default login',
-    note: 'Requires Waymo dataset access approval at waymo.com/open',
+    note: 'Requires Waymo dataset access approval at waymo.com/open. Uses the camera_image Parquet schema.',
   },
   {
-    name: 'nuScenes (GCS mirror)',
-    uri: 'gs://your-bucket/nuscenes/v1.0-trainval/samples',
+    name: 'Custom Waymo-format GCS Dataset',
+    uri: 'gs://your-bucket/path/to/camera_image',
     auth: 'gcloud auth application-default login',
-    note: 'Point at your org\'s GCS mirror of the nuScenes sample directory',
-  },
-  {
-    name: 'Custom GCS Dataset',
-    uri: 'gs://your-bucket/path/to/parquet-files',
-    auth: 'gcloud auth application-default login',
-    note: 'Any GCS path containing Parquet scene files',
+    note: 'Any GCS path containing Waymo v2 camera_image Parquet files (key.camera_name, key.frame_timestamp_micros, [CameraImageComponent].image columns).',
   },
 ]
 
@@ -67,8 +69,10 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   const [pathError, setPathError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   const [probing, setProbing] = useState(false)
+  const [logsJob, setLogsJob] = useState<BatchJob | null>(null)
   const [segmentCount, setSegmentCount] = useState<number | null>(null)
   const [maxSegments, setMaxSegments] = useState<number | 'all'>(5)
+  const [mode, setMode] = useState<BatchMode>('both')
 
   const isValidGcsUri = (uri: string) => /^gs:\/\/[^/]+\/.+/.test(uri.trim())
   const canLaunch = isValidGcsUri(dataSourceUri) && batchLabel.trim() !== '' && region !== '' && !launching && !probing && !pathError
@@ -94,7 +98,9 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
         setPathError(result.detail)
       }
     } catch {
-      setPathError('Could not reach backend to validate path.')
+      // Distinct from a genuinely invalid path (which returns valid:false with a
+      // reason): this means the ingest service itself didn't respond.
+      setPathError('Ingest service is unreachable — the backend may not be running. This is NOT a problem with your path.')
     } finally {
       setProbing(false)
     }
@@ -105,7 +111,7 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
     setLaunching(true)
     setPathError(null)
     try {
-      await onLaunchBatch(dataSourceUri, batchLabel, region, maxSegments === 'all' ? 0 : maxSegments)
+      await onLaunchBatch(dataSourceUri, batchLabel, region, maxSegments === 'all' ? 0 : maxSegments, mode)
       setDataSourceUri('')
       setBatchLabel('')
       setRegion('')
@@ -155,13 +161,13 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
   }
 
   const formatSceneCount = (job: BatchJob) => {
-    if (job.status === 'running') {
-      return `${job.scenesProcessed.toLocaleString()}...`
-    }
+    const n = (job.scenesProcessed ?? 0).toLocaleString()
+    // The "Running" status badge already conveys in-progress; don't append "..."
+    // (it made a 0 render as "0..." / a running 100 as "100...").
     if (job.status === 'failed') {
-      return `${job.scenesProcessed.toLocaleString()} / ${job.totalScenes?.toLocaleString() ?? '?'}`
+      return `${n} / ${job.totalScenes?.toLocaleString() ?? '?'}`
     }
-    return job.scenesProcessed.toLocaleString()
+    return n
   }
 
   return (
@@ -345,6 +351,28 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
               </div>
             )}
 
+            {/* Pipeline mode — the GPU runs one model at a time, so 'Both' is sequential */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Pipeline</Label>
+              <div className="grid sm:grid-cols-3 gap-2">
+                {BATCH_MODES.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setMode(m.value)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      mode === m.value
+                        ? 'border-primary bg-primary/10'
+                        : 'border-muted-foreground/20 hover:border-primary/50'
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-foreground">{m.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{m.detail}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Launch Button */}
             <Button
               size="lg"
@@ -370,6 +398,20 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
             <CardTitle className="text-base font-medium">Batch History</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 overflow-auto">
+            {logsJob && (
+              <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium text-destructive">
+                    Logs — {logsJob.label}
+                    {logsJob.stage ? ` (failed at stage: ${logsJob.stage})` : ''}
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={() => setLogsJob(null)}>Close</Button>
+                </div>
+                <pre className="text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto text-muted-foreground font-mono">
+{logsJob.error || 'No error detail recorded for this batch.'}
+                </pre>
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -420,7 +462,12 @@ export function IngestTab({ batchJobs, onLaunchBatch, onViewClusterSpace }: Inge
                         <span className="text-xs text-muted-foreground">In progress...</span>
                       )}
                       {job.status === 'failed' && (
-                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setLogsJob(job)}
+                        >
                           View Logs
                         </Button>
                       )}

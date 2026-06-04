@@ -2,6 +2,19 @@
 __pycache__/
 .venv/
 .env
+
+# Local run artifacts / caches (regenerable; not source)
+cache/
+pipeline/modules/judge_ui/ratings/
+frontend/package-lock.json
+
+# GCS service-account keys — NEVER commit (private signing keys)
+nvidia-adr-*.json
+pipeline/nvidia-adr-*.json
+*service-account*.json
+*sa-key*.json
+*-credentials.json
+
 bevfusion/
 docs/
 .cursor/rules

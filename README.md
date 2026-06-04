@@ -1,220 +1,125 @@
-# Verity — Adversarial Environment Generator
+# Verity — Autonomous-Vehicle Safety Scenario Discovery
 
-Autonomous Vehicle safety validation pipeline. Ingests fleet footage, embeds scenes with NVIDIA Cosmos, clusters them in UMAP space, and runs a multi-agent LLM debate to surface the highest-priority adversarial scenarios for sim testing.
+Verity mines real driving footage to surface the **edge cases your AV stack has not been validated against** — operationally difficult and under-represented scenes — and turns them into **structured, simulator-ready scenario specifications** your team can prioritize, generate, and test.
 
-[Wiki](https://github.com/cs210/NVIDIA-ADR-1/wiki)
+You bring driving data. Verity annotates it, discovers the rare and difficult scenes, ranks them by how hard they are for an automated driver, and presents them for human review with supporting evidence and a generation-ready description for each.
+
+---
+
+## What you get
+
+After a run on your data, Verity delivers:
+
+- **A ranked list of edge-case scenarios** — surfaced from your footage by *model-judged operational difficulty* and *rarity of behavior / conditions*, not by hand-written rules.
+- **Grounded evidence** — for every surfaced scenario, the real scene(s) it was drawn from, viewable and playable in the review UI, with a pointer from each structured tag back to the observation that justified it.
+- **Simulator-ready scenario descriptions** — a vivid, complete spec for each scenario (road layout, signals, weather, lighting, agents and their intent), suitable for driving-scene generation.
+- **An evolving scene taxonomy** — an emergent label vocabulary that grows richer as you add data, with no fixed schema to maintain.
+- **A blinded human-review UI** — raters score each scenario; ratings persist for calibration.
 
 ---
 
 ## How it works
 
 ```
-GCS driving data
-      │
-      ▼
-[Stage 1] MP4 conversion       waymo_video_pipeline.py
-      │
-      ▼
-[Stage 2] Scene window extraction   waymo_extract_scene_windows.py
-      │
-      ▼
-[Stage 3] Cosmos Embed1 NIM         waymo_embed_scenes.py
-          (1280-d per scene, concurrent)
-      │
-      ▼
-[Stage 4] UMAP + HDBSCAN            waymo_cluster_embeddings.py
-          → cluster JSONL + flagged scenarios
-      │
-      ▼
-FastAPI backend  ←──SSE──→  Next.js frontend (Verity UI)
+  Driving data ─▶ Annotate ─▶ Build taxonomy ─▶ Select ─▶ Synthesize ─▶ Review
+   (clips)        (VLM)        (emergent)        (rank)    (scenario)     (UI)
 ```
 
-The UI has four tabs:
+1. **Ingest** — driving data (Waymo Parquet / TFRecord, or a bucket of MP4s) becomes per-scene video clips.
+2. **Annotate** — a vision-language model watches each clip and writes a free-form analysis, then a structuring pass extracts typed descriptors. Each descriptor carries (a) a **salience** score (how operationally critical it is) and (b) a **span pointer** back to the sentence that justified it. This is immutable evidence.
+3. **Build the taxonomy** — descriptors are clustered into **emergent canonical labels** that persist and refine across runs. The vocabulary is not fixed; it grows and sharpens as more data arrives, and past data is re-projected onto the richer taxonomy automatically.
+4. **Select** — scenes are ranked by **model-judged difficulty (primary)** and **behavior-novelty (refining)**, with an independent difficulty cross-check that flags possible over-reports.
+5. **Synthesize** — each surfaced scene is turned into a **novel, generation-ready scenario** derived from its components (not a caption of one clip).
+6. **Review** — the surfaced scenarios appear in the **Judge** tab for human rating (coherence + usefulness).
 
-| Tab | Purpose |
-|-----|---------|
-| **Ingest** | Point Verity at a GCS dataset path and launch a batch |
-| **Cluster Space** | 3-D UMAP scatter plot — click any point to inspect the scene |
-| **Analysis** | Proponent → Critic → Judge multi-agent debate on a selected scene |
-| **Dashboard** | Ranked list of flagged high-priority scenarios |
+Verity is built as a set of independent, swappable modules (the [pipeline reference](pipeline/README.md) is the technical guide). Annotation, taxonomy, and selection are decoupled, so any stage — including the reasoning model — can be replaced without touching the others.
 
 ---
 
-## Repo layout
+## What you need
 
-```
-NVIDIA-ADR-1/
-├── frontend/               Next.js 14 app (TypeScript, Tailwind v4, shadcn/ui)
-│   ├── app/page.tsx        Root page — tab state, data fetching
-│   ├── components/         Tab components + shared UI
-│   └── lib/
-│       ├── api.ts          All fetch calls to FastAPI backend
-│       └── types.ts        Shared TypeScript types
-│
-├── waymo_pipeline/         Python backend package
-│   ├── waymo_runner.py     FastAPI server (entry point)
-│   ├── waymo_video_pipeline.py       Stage 1 — Parquet → MP4
-│   ├── waymo_extract_scene_windows.py Stage 2 — scene window extraction
-│   ├── waymo_embed_scenes.py          Stage 3 — Cosmos embedding
-│   └── waymo_cluster_embeddings.py   Stage 4 — UMAP + HDBSCAN
-│
-├── pipeline/               Original pipeline (reference implementation)
-├── smoke_test.py           End-to-end smoke test with synthetic embeddings
-├── .env.example            Required environment variables
-└── README.md               This file
-```
-
----
-
-## Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- `gcloud` CLI (for GCS access)
-- NVIDIA NIM API key (Cosmos Embed1 + LLM endpoints)
-- GCS bucket with write access (for processed MP4s)
+| | |
+|---|---|
+| **Driving data** | Waymo Open Dataset (Parquet or TFRecord), or a GCS bucket of MP4 clips |
+| **Cloud storage** | A Google Cloud Storage bucket you control |
+| **Reasoning model** | An NVIDIA GPU to self-host the model (recommended), or an [NVIDIA API key](https://build.nvidia.com) |
+| **Runtime** | Python 3.10+ (pipeline), pnpm 8+ (review UI) |
 
 ---
 
 ## Setup
 
-### 1. Clone and create virtualenv
+### 1. Install
 
 ```bash
-git clone https://github.com/cs210/NVIDIA-ADR-1.git
-cd NVIDIA-ADR-1
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r waymo_pipeline/requirements.txt
+git clone <repo-url> && cd Verity
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cd frontend && pnpm install && cd ..
 ```
 
-### 2. Configure environment variables
+### 2. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env with your values
 ```
 
-Key variables:
+Fill in your NVIDIA key and (optionally) point the model at a self-hosted endpoint:
 
-| Variable | Description |
-|----------|-------------|
-| `NVIDIA_API_KEY` | NIM API key from build.nvidia.com |
-| `COSMOS_EMBED_URL` | Cosmos Embed1 NIM endpoint URL |
-| `NVIDIA_LLM_MODEL` | LLM model ID for the debate agents |
-| `WAYMO_DEST_BUCKET` | GCS bucket for storing processed MP4s |
-| `WAYMO_SOURCE_BUCKET` | Source dataset bucket (default: waymo_open_dataset_v_2_0_1) |
-| `WAYMO_SOURCE_PREFIX` | Path prefix inside source bucket |
+```bash
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_BASE_URL=http://localhost:8081/v1   # local NIM; or the hosted endpoint
+GCS_PROJECT=your-gcp-project
+```
 
-### 3. Authenticate with Google Cloud
-
-The pipeline reads from and writes to GCS using Application Default Credentials — no credentials are entered in the UI.
+Authenticate to your bucket once:
 
 ```bash
 gcloud auth application-default login
+# or, on a VM: GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ```
 
-Re-run every ~60 days, or configure a service account key for production.
+### 3. Run the reasoning model
 
-### 4. Install frontend dependencies
+**Recommended — self-hosted NIM on your GPU** (≈10× faster, no rate limits):
 
 ```bash
-cd frontend
-npm install
+# set NGC_API_KEY in .env (same NVIDIA account), then:
+docker compose --profile gpu up -d        # Cosmos-Reason on :8081
 ```
+
+A single L40S / A100 (40 GB+) runs the reasoning model comfortably. **Fallback:** leave `NVIDIA_BASE_URL` on the hosted endpoint and set only `NVIDIA_API_KEY` (zero setup, slower). Text embeddings for the taxonomy use a hosted endpoint by default and do not compete for the GPU.
 
 ---
 
-## Running locally
-
-Open two terminals from the repo root.
-
-**Terminal 1 — Backend**
+## Run a discovery session
 
 ```bash
-source .venv/bin/activate
-cd waymo_pipeline
-uvicorn waymo_runner:app --reload --port 8000
+# 1. Ingest driving data into per-scene clips (canonical path):
+python -m pipeline.run ingest \
+  --source-format waymo_parquet \
+  --source-root gs://waymo-bucket/validation/camera_image \
+  --bucket gs://your-bucket/verity --segments all
+
+# 2. Review server + UI:
+uvicorn pipeline.modules.judge_ui.server:app --port 8001
+cd frontend && pnpm dev
 ```
 
-**Terminal 2 — Frontend**
+Open [http://localhost:3000](http://localhost:3000) → the **Judge** tab. For each surfaced scenario your reviewers can play the source scene, read the generation-ready description, and score it. Multiple reviewers rate independently; ratings merge automatically.
 
-```bash
-cd frontend
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
+> The emergent-taxonomy + salience discovery flow (annotation → taxonomy → selection → synthesis) is driven by the composition-root scripts in the repo root (`verity_*.py`); they wire the modules together and write the feed the Judge UI reads. See the [pipeline reference](pipeline/README.md) for how they compose.
 
 ---
 
-## Smoke test (no real data needed)
+## Repository layout
 
-Generates 88 synthetic 1280-d embeddings (4 tight clusters + 8 noise points), runs the full clustering stage, and writes outputs that the UI can load:
+| Path | What |
+|---|---|
+| `pipeline/interfaces/` | Shared, frozen data contracts (the only thing modules share) |
+| `pipeline/modules/` | The lego-block modules — storage, extractor, curator, selection, hypothesizer, scorer, judge UI, evaluation |
+| `pipeline/run.py` | CLI composition root for the canonical ingest / analyze / report path |
+| `frontend/` | The Next.js review UI (single origin; proxies to the judge server) |
+| `verity_*.py` | Composition-root drivers for the emergent-taxonomy + salience discovery flow |
 
-```bash
-source .venv/bin/activate
-python smoke_test.py
-```
-
-Then start the backend and frontend — Cluster Space will show the synthetic clusters immediately. Analysis won't return real outputs (no actual video), but you can verify the agent stepper UI and history panel.
-
----
-
-## UI walkthrough
-
-### Ingest tab
-
-1. Expand **"How to connect your dataset"** for setup instructions and example URIs.
-2. Paste a `gs://bucket/path` URI or click **"Use this"** next to a dataset example.
-3. Set a **Batch Label** (e.g., `Phoenix Q4 Highway`) and pick a **Region**.
-4. Click **Launch Batch**. The batch appears in the history table below with a live status.
-5. When status turns **Completed**, click **View Clusters** to jump to Cluster Space.
-
-### Cluster Space tab
-
-- Drag to rotate, scroll to zoom.
-- Click any point to open the **Scene Details** modal — shows the video clip, environment metadata, and detected events.
-- Click **Analyze this scene** to send the scene to the Analysis tab.
-- The right panel shows cluster statistics and a per-cluster density bar.
-- Noise points (red) are scenes that didn't fit any cluster — often the most unusual.
-
-### Analysis tab
-
-- A scene must be selected first (via Cluster Space → "Analyze this scene").
-- Click **Generate Analysis** to start the three-agent debate:
-  - **Proposer** — proposes an adversarial scenario based on the scene
-  - **Critic** — challenges the proposal for safety coverage gaps
-  - **Judge** — weighs the debate and issues a verdict + priority score (0–100)
-- Each agent's terminal streams output live as the pipeline runs.
-- Completed analyses are saved to browser `localStorage` and appear under **History**.
-
-### Dashboard tab
-
-- Shows all flagged high-priority scenarios across all ingested batches.
-- Sorted by priority score descending.
-- Click **View** on any row to jump to its Analysis.
-
----
-
-## Deploying on Brev
-
-1. Provision a Brev instance (GPU recommended for Cosmos embedding; CPU-only works for clustering + debate).
-2. Clone the repo and follow the [Setup](#setup) steps above.
-3. Set your NIM API key and GCS credentials on the instance.
-4. Run the backend with `--host 0.0.0.0`:
-   ```bash
-   uvicorn waymo_pipeline.waymo_runner:app --host 0.0.0.0 --port 8000
-   ```
-5. Update `NEXT_PUBLIC_API_URL` in `frontend/.env.local` to point at the Brev instance's public URL.
-6. Run the frontend (`npm run dev` or `npm run build && npm start`).
-
----
-
-## Architecture notes
-
-- **Embedding concurrency**: `waymo_embed_scenes.py` uses a `ThreadPoolExecutor` with a `threading.Lock` on the JSONL write so workers don't corrupt output.
-- **Two-pass UMAP**: a 50-d pass feeds HDBSCAN for clustering; a separate 3-d pass produces the visualization coordinates. This avoids the crowding artifacts that come from clustering directly in 3-d.
-- **SSE progress**: the runner pipes subprocess stdout line-by-line over Server-Sent Events so the UI updates in real time without polling.
-- **No credentials in UI**: the Ingest tab accepts a GCS URI but never touches credentials — the backend machine's ADC handles auth transparently.
-- **Scene modal video**: the backend generates a short-lived signed URL for each scene clip; `cluster-space-tab.tsx` passes it directly to a `<video>` element.
+For the full architecture, module contracts, and data flow, see **[`pipeline/README.md`](pipeline/README.md)**.

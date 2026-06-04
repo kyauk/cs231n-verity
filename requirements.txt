@@ -1,20 +1,48 @@
+# Top-level project deps. A clean `pip install -r requirements.txt` gives you
+# everything both backends need (pipeline/ and waymo_pipeline/). Each backend
+# also ships its own requirements.txt for documentation / standalone install.
+
+# --- API server (used by both backends + judge_ui + dev_dashboard) ---
 fastapi
-uvicorn
+uvicorn[standard]
 asyncpg
 python-dotenv
+python-multipart        # multipart form uploads for waymo_pipeline debate test server
 pydantic
 httpx
 openai
-umap-learn
-hdbscan
+
+# --- VLM / embeddings ---
+# (Cosmos-Reason2 + scorer NIM clients live in pipeline/modules/; waymo_pipeline's
+# debate actors call the same OpenAI-compatible endpoints.)
+
+# --- numerics + clustering ---
 numpy
+pandas
+pyarrow                 # waymo_pipeline parquet read path
 matplotlib
 scikit-learn
+umap-learn
+hdbscan
+tqdm                    # waymo_pipeline progress bars
 Pillow
+
+# --- storage ---
+boto3
+google-cloud-storage
+google-auth
+gcsfs                   # waymo_pipeline reads Waymo Open Dataset Parquet via gs:// URIs
+
+# --- database (alembic migrations + pgvector population) ---
 alembic
 psycopg2-binary
-flake8
+
+# --- video processing ---
 opencv-python-headless
-boto3
+
+# --- HTTP client + plotting ---
 requests
 plotly
+
+# --- dev tooling ---
+flake8

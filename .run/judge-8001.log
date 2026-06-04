@@ -1,0 +1,32 @@
+INFO:     Started server process [122771]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+[JudgeUI] Loaded 30 proposals (27 accepted) from /home/ubuntu/NVIDIA-ADR-1/outputs/session-1/scored.json
+[JudgeUI] WindowStorage initialized for gs://nvidia-adr-waymo-segment-videos/verity
+INFO:     127.0.0.1:48998 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49008 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51268 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51272 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54120 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45160 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:45166 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60050 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60054 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60064 - "GET /judge/proposals/d77801d12689ce4a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52902 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32930 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32934 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55234 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55238 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56772 - "GET /judge/proposals/02e50364855477e1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47358 - "POST /judge/ratings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47372 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34292 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34304 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55094 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55110 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51366 - "GET /judge/proposals/95f3c4c2658134e8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49128 - "GET /judge/session/jason HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49138 - "GET /judge/proposals HTTP/1.1" 200 OK

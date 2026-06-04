@@ -2,11 +2,28 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Database, ScatterChart, Brain, LayoutDashboard } from 'lucide-react'
+import {
+  Brain,
+  ClipboardCheck,
+  Database,
+  FlaskConical,
+  Gavel,
+  LayoutDashboard,
+  ScatterChart,
+} from 'lucide-react'
 import { IngestTab } from '@/components/ingest-tab'
 import { ClusterSpaceTab } from '@/components/cluster-space-tab'
 import { AnalysisTab } from '@/components/analysis-tab'
 import { DashboardTab } from '@/components/dashboard-tab'
+import { JudgeTab } from '@/components/judge-tab'
+import { DevAccuracyTab } from '@/components/dev-accuracy-tab'
+import { DevDiscriminationTab } from '@/components/dev-discrimination-tab'
+
+// Dev-dashboard tabs are conditionally rendered. They only appear when the
+// build was given NEXT_PUBLIC_DEV_DASHBOARD_URL — keeps them off customer
+// deployments. The backend additionally refuses to start without
+// VERITY_DEV_MODE=1 on the server side.
+const DEV_DASHBOARD_ENABLED = !!process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL
 import {
   fetchBatchJobs,
   launchBatch,
@@ -80,9 +97,14 @@ export default function Home() {
     label: string,
     region: string,
     maxSegments: number,
+    mode: 'cluster' | 'reason' | 'both',
   ) => {
     // Let errors propagate — IngestTab catches and displays them inline.
-    await launchBatch(dataSourceUri, label, region, maxSegments)
+    const created = await launchBatch(dataSourceUri, label, region, maxSegments, mode)
+    // Show the new batch immediately rather than waiting on the refetch, which
+    // can momentarily lag the just-written record. loadBatchJobs then reconciles,
+    // and the running-state poll (below) picks up subsequent status changes.
+    setBatchJobs((prev) => [created, ...prev.filter((b) => b.id !== created.id)])
     await loadBatchJobs()
   }
 
@@ -109,7 +131,7 @@ export default function Home() {
             <span className="text-primary-foreground font-bold text-sm">AV</span>
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">Adversarial Environment Generator</h1>
+            <h1 className="text-lg font-semibold text-foreground">Verity Platform</h1>
             <p className="text-xs text-muted-foreground">Autonomous Vehicle Safety Validation</p>
           </div>
         </div>
@@ -151,6 +173,31 @@ export default function Home() {
               <LayoutDashboard className="w-4 h-4 mr-2" />
               Dashboard
             </TabsTrigger>
+            <TabsTrigger
+              value="judge"
+              className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+            >
+              <Gavel className="w-4 h-4 mr-2" />
+              Judge
+            </TabsTrigger>
+            {DEV_DASHBOARD_ENABLED && (
+              <>
+                <TabsTrigger
+                  value="dev-accuracy"
+                  className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+                >
+                  <ClipboardCheck className="w-4 h-4 mr-2" />
+                  Dev · Accuracy
+                </TabsTrigger>
+                <TabsTrigger
+                  value="dev-discrimination"
+                  className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+                >
+                  <FlaskConical className="w-4 h-4 mr-2" />
+                  Dev · Discrimination
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
         </div>
 
@@ -171,7 +218,7 @@ export default function Home() {
             />
           </TabsContent>
 
-          <TabsContent value="analysis" className="h-full m-0 data-[state=inactive]:hidden">
+          <TabsContent value="analysis" forceMount className="h-full m-0 data-[state=inactive]:hidden">
             <AnalysisTab
               scene={analysisScene}
             />
@@ -183,6 +230,27 @@ export default function Home() {
               onViewScenario={handleViewScenario}
             />
           </TabsContent>
+
+          <TabsContent value="judge" className="h-full m-0 data-[state=inactive]:hidden">
+            <JudgeTab />
+          </TabsContent>
+
+          {DEV_DASHBOARD_ENABLED && (
+            <>
+              <TabsContent
+                value="dev-accuracy"
+                className="h-full m-0 data-[state=inactive]:hidden"
+              >
+                <DevAccuracyTab />
+              </TabsContent>
+              <TabsContent
+                value="dev-discrimination"
+                className="h-full m-0 data-[state=inactive]:hidden"
+              >
+                <DevDiscriminationTab />
+              </TabsContent>
+            </>
+          )}
         </div>
       </Tabs>
     </div>
