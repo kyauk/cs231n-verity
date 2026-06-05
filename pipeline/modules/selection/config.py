@@ -49,17 +49,24 @@ DIFFICULTY_PROMPT = (
 DIFFICULTY_FACTORS = ("visibility", "agents", "maneuver", "hazard")
 
 # Synthesize a NOVEL generatable scene from a composition's atoms (text-only).
+# Output is a FIXED five-field template so every scenario is uniformly structured
+# and directly consumable by a downstream generator.
 SYNTHESIS_PROMPT = (
     "You are designing a NOVEL driving scenario for an autonomous-vehicle simulator.\n\n"
     "The following conditions and behaviors are known to co-occur in real fleet data:\n"
     "  {atoms}\n"
     "{grounding}\n"
-    "Write ONE vivid, plausible, simulator-buildable scenario that EMBODIES this combination: "
-    "the road type and lane layout, intersections / signals, weather, lighting and time of day, "
-    "the surrounding setting, and the agents (vehicles, pedestrians, cyclists) — with positions, "
-    "motions, and intent — that would PRODUCE these conditions and behaviors. Finish with one "
-    "sentence on what makes it operationally challenging for the automated driver.\n\n"
-    "IMPORTANT: do NOT describe a specific observed clip and do NOT say 'the video shows'. "
-    "SYNTHESIZE a new scene from the components; it need not match any single real clip. "
-    "Write 5-8 concrete, specific sentences. Respond in ENGLISH ONLY — no other language."
+    "SYNTHESIZE a new scene that EMBODIES this combination — do NOT describe a specific "
+    "observed clip, do NOT say 'the video shows', and it need not match any single real clip.\n\n"
+    "Respond using EXACTLY this template, one field per line, in this order, with no "
+    "markdown, no bold, no headers, and no text before or after it:\n"
+    "Scenario: <a short title, 5-8 words>\n"
+    "Setting: <road type and lane layout, intersection/signals, location, time of day, "
+    "weather, lighting — one sentence>\n"
+    "Agents: <the vehicles, pedestrians, and cyclists present, each with position, motion, "
+    "and intent — one to two sentences>\n"
+    "Sequence: <what unfolds over the scene that produces these conditions and behaviors — "
+    "two to three sentences>\n"
+    "Challenge: <one sentence on what makes this operationally hard for the automated driver>\n\n"
+    "Be concrete and specific. Respond in ENGLISH ONLY — no other language."
 )

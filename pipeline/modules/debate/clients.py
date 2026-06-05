@@ -133,50 +133,60 @@ def _fetch_clip_bytes(video_ref: str, timeout: float) -> tuple[bytes, str]:
         return handle.read(), mime
 
 
-def _downscale_video_for_budget(raw: bytes) -> bytes:
-    """Re-encode a clip so the NIM can both ACCEPT and DECODE it on one GPU.
+def _video_to_frame_jpegs(raw: bytes) -> list[bytes]:
+    """Sample a few evenly-spaced JPEG frames from a clip — instead of the video.
 
-    Two distinct limits bite on a full ~20s Waymo segment (1920x1280, ~79
-    frames sampled at ~4fps):
+    Why frames, not the video: Cosmos-Reason1 decodes a submitted clip on the
+    GPU's NVDEC, and the NIM's vLLM worker pre-reserves most of the VRAM for KV
+    cache, leaving little (and fluctuating) headroom for video decode. A full
+    ~20s segment intermittently busts that and ``cuvidMapVideoFrame error 2``
+    *segfaults the whole NIM* (exit 139) — not a recoverable per-request error.
+    There is no fixed video size that's reliably safe.
 
-      1. Pixel budget — Cosmos-Reason1 rejects (HTTP 400) any request whose
-         decoded pixels exceed ``VLLM_MAX_TOTAL_VIDEO_PIXELS`` (104M here).
-      2. Decoder memory — the VLM holds every decoded frame in device memory
-         alongside the 7B weights, so too many frames OOMs NVDEC mid-decode
-         (``cuvidMapVideoFrame ... error 2``).
-
-    So we cut BOTH resolution (``VLM_CLIP_MAX_WIDTH``, default 1024) AND frame
-    rate (``VLM_CLIP_FPS``, default 2 -> ~40 frames over 20s, ~28M px). Disable
-    B-frames + force yuv420p for maximum NVDEC compatibility. Whole clip
-    duration is preserved; only resolution + temporal density drop. Best-effort:
-    if ffmpeg is missing or fails, return the original bytes unchanged.
+    Sending a handful of still frames sidesteps NVDEC entirely (images use the
+    normal, cheap image path), so it cannot OOM or crash the decoder, and it has
+    no fps/pixel-budget constraints. The model still gets temporally-ordered
+    coverage of the scene. Tunables: ``VLM_CLIP_FRAMES`` (default 6),
+    ``VLM_CLIP_MAX_WIDTH`` (default 768). Returns [] if ffmpeg is unavailable or
+    extraction fails (caller falls back to sending the raw clip).
     """
-    max_width = int(os.environ.get("VLM_CLIP_MAX_WIDTH", "1024"))
-    fps = float(os.environ.get("VLM_CLIP_FPS", "2"))
-    if max_width <= 0 or shutil.which("ffmpeg") is None:
-        return raw
+    num_frames = max(1, int(os.environ.get("VLM_CLIP_FRAMES", "6")))
+    max_width = int(os.environ.get("VLM_CLIP_MAX_WIDTH", "768"))
+    if shutil.which("ffmpeg") is None:
+        return []
     try:
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "in.mp4")
-            dst = os.path.join(td, "out.mp4")
             with open(src, "wb") as f:
                 f.write(raw)
-            # fps first (fewer frames -> less decoder memory), then scale
-            # (never upscale, keep aspect, even height).
-            vf = f"fps={fps},scale='min({max_width},iw)':-2"
-            proc = subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", src,
-                 "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast",
-                 "-crf", "30", "-bf", "0", "-pix_fmt", "yuv420p", dst],
+            # Total frame count (fallback to a thumbnail spread if unknown).
+            nb = 0
+            if shutil.which("ffprobe") is not None:
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                     "-count_frames", "-show_entries", "stream=nb_read_frames",
+                     "-of", "default=nw=1:nk=1", src],
+                    capture_output=True, text=True,
+                )
+                nb = int(probe.stdout.strip() or "0") if probe.returncode == 0 else 0
+            step = max(1, nb // num_frames) if nb else 1
+            # Evenly-spaced frames: pick every `step`-th, capped to num_frames.
+            select = f"select='not(mod(n\\,{step}))'" if nb else "fps=1"
+            vf = f"{select},scale='min({max_width},iw)':-2"
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vf", vf,
+                 "-vsync", "0", "-frames:v", str(num_frames), "-q:v", "3",
+                 os.path.join(td, "f_%03d.jpg")],
                 capture_output=True, text=True,
             )
-            if proc.returncode != 0 or not os.path.exists(dst):
-                return raw
-            with open(dst, "rb") as f:
-                out = f.read()
-            return out or raw
+            frames: list[bytes] = []
+            for name in sorted(os.listdir(td)):
+                if name.startswith("f_") and name.endswith(".jpg"):
+                    with open(os.path.join(td, name), "rb") as f:
+                        frames.append(f.read())
+            return frames
     except Exception:  # noqa: BLE001 — never let media prep break the VLM call
-        return raw
+        return []
 
 
 class NIMVLMClient:
@@ -234,17 +244,28 @@ class NIMVLMClient:
             timeout=self._timeout,
         )
 
-    def _media_block(self, video_ref: str) -> dict[str, Any]:
-        """Build an OpenAI-style media content block from a clip reference."""
+    @staticmethod
+    def _image_block(jpeg: bytes) -> dict[str, Any]:
+        uri = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+        return {"type": "image_url", "image_url": {"url": uri}}
 
+    def _media_blocks(self, video_ref: str) -> list[dict[str, Any]]:
+        """Build OpenAI-style media content blocks from a clip reference.
+
+        For a video, sample a few still frames and send them as IMAGES (see
+        ``_video_to_frame_jpegs`` — this avoids the NVDEC decode that segfaults
+        the NIM). An already-image ref is sent as-is. If frame extraction yields
+        nothing (no ffmpeg), fall back to sending the raw clip as a video block.
+        """
         raw, mime = _fetch_clip_bytes(video_ref, self._timeout)
-        if mime.startswith("video/"):
-            raw = _downscale_video_for_budget(raw)
-        b64 = base64.b64encode(raw).decode()
-        data_uri = f"data:{mime};base64,{b64}"
         if mime.startswith("image/"):
-            return {"type": "image_url", "image_url": {"url": data_uri}}
-        return {"type": "video_url", "video_url": {"url": data_uri}}
+            return [self._image_block(raw)]
+        frames = _video_to_frame_jpegs(raw)
+        if frames:
+            return [self._image_block(j) for j in frames]
+        # Fallback: no ffmpeg — send the raw video and hope the decoder copes.
+        uri = f"data:{mime};base64," + base64.b64encode(raw).decode()
+        return [{"type": "video_url", "video_url": {"url": uri}}]
 
     def _chat(self, system_prompt: str, content: list[dict[str, Any]]) -> str:
         client = self._get_client()
@@ -268,13 +289,15 @@ class NIMVLMClient:
         """Return JSON: {scene_description, anomaly_rationale, confidence}."""
         content: list[dict[str, Any]] = []
         if video_ref:
-            content.append(self._media_block(video_ref))
+            content.extend(self._media_blocks(video_ref))
         content.append(
             {
                 "type": "text",
                 "text": (
-                    "Anomaly signals for this clip (use as priors, verify against "
-                    "the video):\n" + json.dumps(anomaly_priors, indent=2)
+                    "The images above are time-ordered frames sampled from one "
+                    "driving clip (earliest first). Anomaly signals for the clip "
+                    "(use as priors, verify against the frames):\n"
+                    + json.dumps(anomaly_priors, indent=2)
                 ),
             }
         )
@@ -284,7 +307,7 @@ class NIMVLMClient:
         """Return free-text answer to a targeted question about the clip."""
         content: list[dict[str, Any]] = []
         if video_ref:
-            content.append(self._media_block(video_ref))
+            content.extend(self._media_blocks(video_ref))
         content.append({"type": "text", "text": prompt})
         return self._chat(
             "You are a vision-language assistant answering targeted follow-up "

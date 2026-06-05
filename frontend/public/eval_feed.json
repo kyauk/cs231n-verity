@@ -1,0 +1,152 @@
+[
+  {
+    "id": "ungrounded_16",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Sudden Highway Debris Reveal\nSetting: Three-lane freeway, 65 mph, daylight, dry, moderately dense traffic.\nAgents: A large tread fragment lies in the ego's lane; a truck occupies the left lane; a car tailgates closely behind.\nSequence: The lead vehicle straddles the debris at the last second, revealing it with little time and lanes boxed in on both sides.\nChallenge: High closing speed plus boxed-in lanes make every avoidance option risky, with rear-end exposure if braking."
+  },
+  {
+    "id": "ungrounded_08",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Stopped Bus, No Pedestrians Yet Visible\nSetting: Urban street with a near-side bus stop, daytime, clear and dry.\nAgents: A bus is stopped at the curb ahead; no pedestrians are visible, but the bus fully occludes the area in front of and beside it.\nSequence: The ego passes the stopped bus where a pedestrian could step out from full occlusion at any moment, with no current evidence of one.\nChallenge: The hazard is purely anticipatory \u2014 the right behavior (slow, ready) must be driven by occlusion geometry, not by a visible agent."
+  },
+  {
+    "id": "ungrounded_00",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Lead Vehicle Brakes for an Occluded Reason\nSetting: Two-lane urban street, parked cars on the right, midday, clear and dry.\nAgents: The lead vehicle ahead brakes firmly; the reason (a pedestrian stepping out from between parked cars further up) is hidden from the ego behind the lead vehicle's body.\nSequence: The ego sees only the lead's brake lights with no visible cause, must decide whether this is a normal stop or an emergency, and prepare for a hazard it cannot yet see.\nChallenge: The ego must respond to an effect whose cause is occluded, distinguishing a routine stop from a hidden emergency without the triggering object in view."
+  },
+  {
+    "id": "rarity_13",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Red Light Beside a Cyclist in a Bike Lane\nSetting: Urban intersection with a bike lane, daytime, clear and dry.\nAgents: The signal is red; a cyclist waits or rolls in the adjacent bike lane; a lead vehicle is stopped ahead.\nSequence: The ego stops at the red while a cyclist occupies the parallel bike lane, keeping aware of the cyclist's position through the stop.\nChallenge: A standard stop with a cyclist alongside \u2014 mild lateral awareness, no direct conflict."
+  },
+  {
+    "id": "rarity_04",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Stopping at a Red Light\nSetting: Urban signalized intersection, daytime, clear and dry, moderate traffic.\nAgents: The signal is red; vehicles ahead are stopping; cross traffic flows.\nSequence: The ego detects the red signal and the stopping queue and decelerates to a halt at the stop line.\nChallenge: A baseline stopping maneuver at a red signal."
+  },
+  {
+    "id": "16105359875195888139_4420_000_4440_000",
+    "arm": "verity",
+    "description": "Scenario: Rainy Urban Street with Slippery Roads \nSetting: A wet, reflective urban road surface with no moving vehicles present, likely during daytime with overcast skies. \nAgents: The ego vehicle is stationary, positioned at a red light intersection, with no other moving vehicles, pedestrians, or cyclists in the immediate vicinity. \nSequence: The ego vehicle waits at a red light, surrounded by a quiet, rain-soaked urban setting, and remains stationary, adhering to traffic signals, while the wet conditions require heightened caution if the light were to change. \nChallenge: Ensuring safe adherence to traffic rules while accounting for potential hydroplaning risks and reduced traction on wet surfaces."
+  },
+  {
+    "id": "14133920963894906769_1480_000_1500_000",
+    "arm": "verity",
+    "description": "Scenario: Rainy Urban Intersection \nSetting: A busy city intersection with multiple lanes and traffic signals, wet road, overcast skies, and ongoing rain, surrounded by sidewalks with pedestrians navigating.\nAgents: Several cars and a stopped white van are present, with pedestrians walking along sidewalks and crossing the street, carrying umbrellas and moving cautiously.\nSequence: The automated vehicle navigates this environment, where reduced visibility and spray from other vehicles complicate traffic flow and pedestrian monitoring, requiring careful anticipation of hidden pedestrians behind obstacles.\nChallenge: The AV must navigate reduced visibility caused by wet road conditions and spray from other vehicles while simultaneously monitoring pedestrians who may be obscured by obstacles like the white van."
+  },
+  {
+    "id": "ungrounded_04",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Cyclist Holding Station in the Blind Spot\nSetting: Multi-lane urban arterial with a bike lane, daytime, clear and dry.\nAgents: A cyclist rides in the bike lane at nearly the ego's speed, sitting just aft of the ego's right-side blind spot for an extended period.\nSequence: As the ego considers a right turn or lane adjustment, the matched-speed cyclist remains in the hardest-to-observe region and is easy to lose track of.\nChallenge: A vulnerable road user persists in the blind spot at zero relative motion, the configuration most likely to be dropped before a right-hook."
+  },
+  {
+    "id": "ungrounded_02",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Faded Lane Markings Through a Dusk Curve\nSetting: Two-lane road through a gentle right curve, dusk, dry, worn pavement with faded and partially repainted lane lines.\nAgents: No other agents nearby; old and new lane markings diverge slightly through the curve under low light.\nSequence: The ego follows the lane through the curve where the visual lane evidence is faint and self-contradictory, with reduced contrast at dusk.\nChallenge: Lane-keeping must resolve conflicting, low-contrast markings through a curve \u2014 a quiet failure mode with no agent to cue attention."
+  },
+  {
+    "id": "ungrounded_10",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Trailing Car Closing the Merge Gap\nSetting: Freeway on-ramp merging into the right lane, daytime, dry, moderate traffic.\nAgents: The ego targets a legal gap in the mainline; the vehicle trailing that gap accelerates, shrinking it as the ramp runs out.\nSequence: The ego must complete the merge into a gap that is closing because the trailing driver is contesting it, before the acceleration lane ends.\nChallenge: A nominally sufficient gap becomes insufficient due to another agent's choice, compressing the merge decision with no lane left."
+  },
+  {
+    "id": "11236550977973464715_3620_000_3640_000",
+    "arm": "verity",
+    "description": "Scenario: Urban Intersection during Rain\nSetting: A multi-lane urban intersection with traffic lights, surrounded by buildings, with a wet road and overcast sky.\nAgents: An autonomous vehicle is behind stationary cars at the red light, while pedestrians cross the crosswalk following the green signal.\nSequence: The AV stops behind vehicles as the traffic light remains red, pedestrians continue crossing, and the AV waits before proceeding once the light turns green.\nChallenge: The AV must detect changing traffic signals, maintain a safe distance, and monitor pedestrians while braking cautiously on the wet road."
+  },
+  {
+    "id": "rarity_11",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Steady Course at Night\nSetting: Lit urban road at night, clear and dry, light traffic.\nAgents: The ego maintains a steady course at night; a few vehicles travel ahead with taillights visible.\nSequence: The ego holds lane and speed under street lighting, following the flow with no conflicts.\nChallenge: Routine night cruising; reduced lighting is the only mild factor."
+  },
+  {
+    "id": "rarity_19",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Red Light Under Routine Conditions\nSetting: Urban signalized intersection, daytime, clear and dry, routine conditions.\nAgents: The signal is red; a lead vehicle is stopped; conditions are entirely routine.\nSequence: The ego approaches under routine conditions and stops at the red behind the queue.\nChallenge: By construction a routine stop \u2014 illustrating that statistically rare compositions are frequently mundane."
+  },
+  {
+    "id": "rarity_02",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Steady Course While Yielding to Pedestrians\nSetting: Low-speed urban street with a marked crosswalk, daytime, clear and dry.\nAgents: Pedestrians cross at the crosswalk; the ego maintains a steady course on approach; no other vehicles nearby.\nSequence: The ego holds a steady speed toward the crosswalk, then yields by slowing and waiting as pedestrians complete the crossing.\nChallenge: A standard yield: detect the crosswalk occupancy and wait, with no conflicting traffic."
+  },
+  {
+    "id": "ungrounded_13",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Occluded Pedestrian Between Parked Cars\nSetting: Narrow residential street lined with parked cars, late afternoon, clear, low speed limit.\nAgents: A ball rolls into the street from between parked cars; a child follows it from full occlusion; cars parked tightly on each side.\nSequence: The ego sees the ball first, then the child darts out from between two parked cars directly into the lane.\nChallenge: The only early cue is the ball; the child appears from total occlusion at close range with almost no reaction margin."
+  },
+  {
+    "id": "rarity_15",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Localized Reduced Visibility in Clear Weather\nSetting: Open road under broadly clear weather with a localized visibility reduction (low sun or brief haze), dry surface.\nAgents: Traffic ahead is sparse; a patch of glare or haze briefly reduces forward visibility despite the clear sky.\nSequence: The ego passes through a short stretch where visibility drops, then clears, adjusting speed mildly through the patch.\nChallenge: A brief, localized visibility dip in otherwise clear conditions \u2014 a contradictory-seeming but low-severity pairing."
+  },
+  {
+    "id": "6142170920525844857_2080_000_2100_000",
+    "arm": "verity",
+    "description": "Scenario: Residential Street Red Light Stop \nSetting: A narrow residential street with parked cars, a bicycle lane, and an intersection with a stop sign under overcast daytime skies with soft lighting.\nAgents: The ego vehicle is stopped at the red light, a pedestrian is crossing the street ahead, and a cyclist is riding in the bike lane to the right, while another vehicle is stopped across the intersection.\nSequence: The ego vehicle waits at the red light, the pedestrian walks across the crosswalk, the cyclist proceeds in the bike lane, and the vehicle across the intersection stays stopped.\nSequence: The overcast weather and quiet environment contribute to the calm flow of traffic, with all agents adhering to traffic rules.\nChallenge: Ensuring safe interaction with the pedestrian while monitoring the cyclist and the cross-traffic during the stop."
+  },
+  {
+    "id": "ungrounded_06",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Double-Parked Van Forcing a Two-Way Negotiation\nSetting: Narrow two-way residential street, parked cars both sides, daytime, dry.\nAgents: A delivery van is double-parked blocking the ego's lane; an oncoming car approaches from the other direction toward the same gap.\nSequence: The ego must borrow the oncoming lane to pass the van while an oncoming vehicle contests the single free gap, requiring an unspoken right-of-way negotiation.\nChallenge: Progress requires entering opposing traffic's lane and resolving who yields with no signal or rule to arbitrate it."
+  },
+  {
+    "id": "ungrounded_15",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Emergency Vehicle From Behind at a Green\nSetting: Signalized urban intersection, daytime, moderate traffic, ego first in queue.\nAgents: An ambulance with sirens approaches from directly behind; cross traffic flows on the ego's green; pedestrians are in the crosswalk.\nSequence: The ego must yield to the ambulance, but moving forward enters live cross traffic and an occupied crosswalk.\nChallenge: Yielding to the emergency vehicle conflicts with the right-of-way of cross traffic and pedestrians, with no clearly safe maneuver."
+  },
+  {
+    "id": "2107164705125601090_3920_000_3940_000",
+    "arm": "verity",
+    "description": "Scenario: Urban Road with Cyclist \nSetting: The ego vehicle is on a two-lane urban road during daylight with clear lane markings, a parked red car on the right, and another vehicle driving ahead in the same direction.\nAgents: The ego vehicle is traveling steadily in the left lane, while a cyclist is in the bike lane on the right side of the road, moving at a moderate speed, and a parked car and a forward vehicle are also present.\nSequence: The ego vehicle maintains a safe distance from the parked red car and the forward vehicle, while the cyclist continues moving in the bike lane, and the ego vehicle must be prepared for potential sudden movements from the cyclist.\nChallenge: Ensuring the ego vehicle does not encroach on the bike lane while monitoring the cyclist's movements and maintaining a safe distance from the parked car."
+  },
+  {
+    "id": "ungrounded_14",
+    "arm": "ungrounded_llm",
+    "description": "Scenario: Unprotected Left Across Fast Oncoming\nSetting: Four-lane arterial, permissive green, dusk, dry, low sun behind oncoming traffic.\nAgents: The ego waits to turn left; oncoming vehicles approach at 45 mph; one is partly hidden in glare and accelerating to beat the light.\nSequence: A gap appears but the glare-obscured oncoming car is closing faster than it looks as the signal ages toward yellow.\nChallenge: Misjudging a glare-hidden oncoming vehicle's speed during an unprotected turn is a classic high-severity conflict."
+  },
+  {
+    "id": "rarity_17",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Red Light in Moderate Traffic\nSetting: Urban signalized intersection, daytime, clear and dry, moderate traffic.\nAgents: The signal is red; a moderate queue forms; cross traffic flows.\nSequence: The ego joins the moderate queue and stops at the red, advancing normally when the phase changes.\nChallenge: A standard stop within moderate traffic \u2014 ordinary urban driving."
+  },
+  {
+    "id": "3132521568089292927_2220_000_2240_000",
+    "arm": "verity",
+    "description": "Scenario: Rainy Highway with Reduced Visibility \nSetting: Multi-lane highway with foggy and rainy conditions, limited visibility, and slippery roads, during a time of day with low light.\nAgents: Ego vehicle is in the right lane, maintaining a steady course and moderate speed, following a large white semi-truck ahead with brake lights on, while other vehicles are present but not in immediate proximity.\nSequence: The rainy and foggy conditions reduce visibility, making it challenging to anticipate sudden stops or lane changes, so the ego vehicle adjusts speed cautiously, keeping a safe following distance from the semi-truck, and other drivers also exhibit cautious behavior.\nChallenge: Ensuring a safe following distance in reduced visibility and slippery conditions while anticipating the actions of the semi-truck and other vehicles."
+  },
+  {
+    "id": "rarity_08",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Red Light With No Active Interactions\nSetting: Signalized intersection, daytime, clear and dry, minimal traffic.\nAgents: The signal is red; no agents interact with the ego; a lead vehicle is stopped ahead.\nSequence: The ego stops at the red behind the lead vehicle; no pedestrians, cyclists, or cross conflicts engage it.\nChallenge: A stop with no active interactions \u2014 among the lowest-demand situations."
+  },
+  {
+    "id": "6722602826685649765_2280_000_2300_000",
+    "arm": "verity",
+    "description": "Scenario: Rainy Intersection with Pedestrian Activity \nSetting: A four-lane urban intersection with traffic lights, located in a city, with a wet road surface, late afternoon, and overcast weather.\nAgents: Several cars are stopped at the red light, while a group of pedestrians waits at the zebra crossing and one individual runs across the street against the signal.\nSequence: Vehicles wait at the red light, then accelerate smoothly when it turns green, while a pedestrian runs across the street, and the autonomous vehicle must navigate around this unexpected movement.\nSequence: The scene unfolds with the vehicles and pedestrians interacting, the pedestrian's unexpected movement creating a challenge for the autonomous vehicle.\nChallenge: The autonomous vehicle must detect the running pedestrian, assess the risk of collision, and adjust its speed and path accordingly, all while navigating the wet road conditions."
+  },
+  {
+    "id": "7934693355186591404_73_000_93_000",
+    "arm": "verity",
+    "description": "Scenario: Silver Sedan Malfunction \nSetting: A multi-lane road with clear weather, bright daylight, and marked lanes, stretching straight ahead into the horizon with traffic signals and street signs present.\nAgents: A silver sedan is stationary in the center lane with visible smoke, indicating a mechanical issue, while a white SUV passes by on the right side at a moderate speed, and other vehicles are seen in adjacent lanes, maintaining their respective lanes and speeds.\nSequence: The silver sedan's malfunction causes it to remain stationary, while the white SUV and other vehicles navigate around it, adhering to traffic rules and maintaining safe distances, with the smoke from the sedan increasing slightly.\nSequence: The overall traffic flow continues uninterrupted, with vehicles adjusting their paths to accommodate the obstacle, testing the system's ability to prioritize and respond effectively in real-time.\nChallenge: The operational difficulty lies in the need for the autonomous vehicle to safely navigate around the malfunctioning sedan while ensuring minimal disruption to surrounding traffic."
+  },
+  {
+    "id": "rarity_06",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Red Light With No Moving Vehicles\nSetting: Empty signalized intersection, daytime, clear and dry.\nAgents: The signal is red; no other vehicles are moving; the intersection is otherwise empty.\nSequence: The ego approaches an empty intersection and stops at the red line, holding until the phase changes.\nChallenge: Essentially no interaction: a solitary stop at a red with no other agents."
+  },
+  {
+    "id": "1939881723297238689_6848_040_6868_040",
+    "arm": "verity",
+    "description": "Scenario: Urban Road with Cyclist \nSetting: A multi-lane urban road with clear lane markings and a sidewalk adjacent to it, appearing dry with daytime lighting and no visible traffic lights or signs nearby.\nAgents: The ego-vehicle is traveling at a moderate speed in its lane, approaching a section where a cyclist is standing on the sidewalk, facing the road and appearing ready to move into the traffic lane.\nSequence: As the ego-vehicle advances, the cyclist remains stationary on the sidewalk but poses a potential hazard if they decide to enter the road, requiring the vehicle's driver to remain vigilant and anticipate the cyclist's next move, creating a challenging scenario for safe navigation.\nChallenge: The primary challenge lies in predicting the cyclist's actions\u2014whether they will remain on the sidewalk, step off onto the road, or continue along the path."
+  },
+  {
+    "id": "4292360793125812833_3080_000_3100_000",
+    "arm": "verity",
+    "description": "Scenario: Urban Road with Public Transport \nSetting: Multi-lane urban road with dedicated bus lanes and tram tracks, clear lane markings, traffic signals, daytime, good visibility, and no adverse weather conditions.\nAgents: An autonomous vehicle travels forward in its lane, maintaining a steady speed, while a pedestrian walks along the sidewalk on the right side, and a bus and tram operate in their respective lanes.\nSequence: The autonomous vehicle proceeds forward, observing the pedestrian and maintaining a safe distance, while the bus and tram continue their operations, adhering to traffic signals, and the scenario showcases the need for constant vigilance.\nChallenge: Ensuring safe navigation while monitoring the pedestrian's potential sudden movements and maintaining awareness of the public transport vehicles' operations."
+  },
+  {
+    "id": "rarity_00",
+    "arm": "compositional_rarity",
+    "description": "Scenario: Steady Approach to a Vehicle Stopped at Red\nSetting: Urban arterial approaching a signalized intersection, daytime, clear and dry, light traffic.\nAgents: A lead vehicle is stopped at the red light ahead; the ego maintains a steady course in the same lane; cross traffic flows normally.\nSequence: The ego holds a constant speed and lane while closing on the queue, then decelerates smoothly to a stop behind the lead vehicle at the red.\nChallenge: A routine stop: the only demand is smooth deceleration behind a stationary lead vehicle at a red signal."
+  }
+]
