@@ -14,8 +14,11 @@ import type {
   VideoUrlResponse,
 } from './dev-types'
 
+// Default to '' so dev fetches are same-origin ('/dev/...') and ride the :3000
+// proxy (next.config.mjs rewrites /dev/* -> :8002). Set NEXT_PUBLIC_DEV_DASHBOARD_URL
+// only when pointing at an absolute backend instead of the proxy.
 export const DEV_API_URL =
-  process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL ?? 'http://localhost:8002'
+  process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL ?? ''
 
 async function _json<T>(resp: Response): Promise<T> {
   if (!resp.ok) {

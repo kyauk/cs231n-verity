@@ -9,6 +9,7 @@ import {
   FlaskConical,
   Gavel,
   LayoutDashboard,
+  ListChecks,
   ScatterChart,
 } from 'lucide-react'
 import { IngestTab } from '@/components/ingest-tab'
@@ -18,12 +19,15 @@ import { DashboardTab } from '@/components/dashboard-tab'
 import { JudgeTab } from '@/components/judge-tab'
 import { DevAccuracyTab } from '@/components/dev-accuracy-tab'
 import { DevDiscriminationTab } from '@/components/dev-discrimination-tab'
+import { BlindTestTab } from '@/components/blind-test-tab'
 
-// Dev-dashboard tabs are conditionally rendered. They only appear when the
-// build was given NEXT_PUBLIC_DEV_DASHBOARD_URL — keeps them off customer
-// deployments. The backend additionally refuses to start without
+// Dev-dashboard tabs are conditionally rendered — kept off customer deployments.
+// Enable with NEXT_PUBLIC_DEV_DASHBOARD=1 (preferred; dev API then goes through
+// the same-origin :3000 proxy), or by setting NEXT_PUBLIC_DEV_DASHBOARD_URL to an
+// absolute backend URL. The backend additionally refuses to start without
 // VERITY_DEV_MODE=1 on the server side.
-const DEV_DASHBOARD_ENABLED = !!process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL
+const DEV_DASHBOARD_ENABLED =
+  process.env.NEXT_PUBLIC_DEV_DASHBOARD === '1' || !!process.env.NEXT_PUBLIC_DEV_DASHBOARD_URL
 import {
   fetchBatchJobs,
   launchBatch,
@@ -180,6 +184,13 @@ export default function Home() {
               <Gavel className="w-4 h-4 mr-2" />
               Judge
             </TabsTrigger>
+            <TabsTrigger
+              value="blind-test"
+              className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4"
+            >
+              <ListChecks className="w-4 h-4 mr-2" />
+              Blind Test
+            </TabsTrigger>
             {DEV_DASHBOARD_ENABLED && (
               <>
                 <TabsTrigger
@@ -233,6 +244,10 @@ export default function Home() {
 
           <TabsContent value="judge" className="h-full m-0 data-[state=inactive]:hidden">
             <JudgeTab />
+          </TabsContent>
+
+          <TabsContent value="blind-test" className="h-full m-0 overflow-auto data-[state=inactive]:hidden">
+            <BlindTestTab />
           </TabsContent>
 
           {DEV_DASHBOARD_ENABLED && (

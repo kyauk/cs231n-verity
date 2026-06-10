@@ -41,7 +41,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from pipeline.modules.runner import store
-from pipeline.modules.runner.gpu_arbiter import GpuBusyError, gpu
+from pipeline.modules.runner.gpu_arbiter import GpuBusyError, GpuUnavailableError, gpu
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs" / "waymo"
@@ -543,21 +543,40 @@ async def run_analysis_stream(payload: RunAnalysisRequest) -> StreamingResponse:
             yield _sse({"kind": "error", "detail": "Could not fetch the video clip for this scene from the bucket."})
             return
 
-        # Reason1 lease — rejected (busy) if an ingest batch is currently embedding.
+        # Reason1 lease — reconcile-on-demand + queue: boots reason1 if the GPU
+        # is off/idle, or waits out an in-progress embed batch. Acquired in an
+        # executor because a cold swap can take minutes (must not block the loop).
+        loop = asyncio.get_event_loop()
+        status = gpu.status()
+        if not status.get("reasonReady"):
+            detail = (
+                "An embedding batch is using the GPU — queued, will start when it finishes."
+                if status.get("embedReady") or status.get("embedWindows")
+                else "Starting the reasoning model on the GPU (first run may take a few minutes)..."
+            )
+            yield _progress("warmup", "Preparing GPU", detail)
+        reason_lease = gpu.reason_lease()
         try:
-            reason_lease = gpu.reason_lease()
-            reason_lease.__enter__()
+            await loop.run_in_executor(None, reason_lease.__enter__)
+        except GpuUnavailableError as unavailable:
+            yield _sse({"kind": "error", "detail": str(unavailable)})
+            return
         except GpuBusyError as busy:
             yield _sse({"kind": "error", "detail": str(busy)})
             return
 
         seg = payload.sceneId.rpartition("/")[0] or payload.sceneId
         run_id = uuid.uuid4().hex[:12]
-        loop = asyncio.get_event_loop()
         try:
             text_client = NIMTextLLMClient()
             vlm_client = NIMVLMClient()
-            cfg = DebateConfig(debate_rounds=max(1, int(payload.debateRounds)))
+            # Speed: the default 5 ReAct steps x 4 actors x 2 rounds is ~10 min of
+            # sequential reasoning-model calls. A single decisive call per actor,
+            # one round, lands ~45s with equivalent verdicts. Tunable via env.
+            cfg = DebateConfig(
+                debate_rounds=int(os.environ.get("DEBATE_ROUNDS", "1")),
+                max_actor_steps=int(os.environ.get("DEBATE_MAX_ACTOR_STEPS", "2")),
+            )
             debater = Debater(text_client, vlm_client, cfg)
 
             base_input = DebateInput(

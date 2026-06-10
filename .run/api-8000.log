@@ -1,9 +1,57 @@
-INFO:     Started server process [1331514]
+INFO:     Started server process [1409151]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:57660 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40880 - "POST /analysis/run-stream HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40882 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56876 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56890 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56906 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49718 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49722 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44636 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44650 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44652 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51378 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51384 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51392 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51406 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51410 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51420 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44872 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44888 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44890 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44896 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44892 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44902 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39508 - "GET /gpu HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39514 - "POST /analysis/run-stream HTTP/1.1" 200 OK
 /home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
   warnings.warn(message, FutureWarning)
+INFO:     127.0.0.1:44874 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44884 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44878 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47592 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34654 - "GET /batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34666 - "GET /cluster-space HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34674 - "GET /scenarios HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34682 - "GET /scenes/11076364019363412893_1711_000_1731_000/0000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34690 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:34696 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:34710 - "POST /analysis/run-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47572 - "GET /scenes/11076364019363412893_1711_000_1731_000/0000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47588 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:47602 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.cloud.storage_control_v2 once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.cloud.storage_control_v2 past that date.
+  warnings.warn(message, FutureWarning)
+INFO:     127.0.0.1:59988 - "GET /probe-path?uri=gs%3A%2F%2Fwaymo_open_dataset_v_2_0_1%2Fvalidation%2Fcamera_image HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55302 - "GET /scenes/11076364019363412893_1711_000_1731_000/0000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55308 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:55324 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:47230 - "GET /scenes/11076364019363412893_1711_000_1731_000/0000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52292 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:52302 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:52312 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:36066 - "GET /scenes/11076364019363412893_1711_000_1731_000/0000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36080 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:53026 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:53028 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:35898 - "GET /video/11076364019363412893_1711_000_1731_000/0?camera=FRONT HTTP/1.1" 206 Partial Content

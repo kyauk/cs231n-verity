@@ -108,7 +108,7 @@ cd frontend && pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) → the **Judge** tab. For each surfaced scenario your reviewers can play the source scene, read the generation-ready description, and score it. Multiple reviewers rate independently; ratings merge automatically.
 
-> The emergent-taxonomy + salience discovery flow (annotation → taxonomy → selection → synthesis) is driven by the composition-root scripts in the repo root (`verity_*.py`); they wire the modules together and write the feed the Judge UI reads. See the [pipeline reference](pipeline/README.md) for how they compose.
+> The emergent-taxonomy + salience discovery flow (annotation → taxonomy → selection → synthesis) is driven by the composition-root scripts in [`drivers/`](drivers/), run as `python -m drivers.<name>` (e.g. `python -m drivers.verity_hardnovel`); they wire the modules together and write the feed the Judge UI reads. See the [pipeline reference](pipeline/README.md) for how they compose.
 
 ---
 
@@ -120,6 +120,6 @@ Open [http://localhost:3000](http://localhost:3000) → the **Judge** tab. For e
 | `pipeline/modules/` | The lego-block modules — storage, extractor, curator, selection, hypothesizer, scorer, judge UI, evaluation |
 | `pipeline/run.py` | CLI composition root for the canonical ingest / analyze / report path |
 | `frontend/` | The Next.js review UI (single origin; proxies to the judge server) |
-| `verity_*.py` | Composition-root drivers for the emergent-taxonomy + salience discovery flow |
+| `drivers/` | Composition-root scripts that wire modules into the discovery flow — run as `python -m drivers.<name>` |
 
 For the full architecture, module contracts, and data flow, see **[`pipeline/README.md`](pipeline/README.md)**.

@@ -1,0 +1,16 @@
+[hn] 4564 descriptors over 1003 scenes; 103 labels
+[hn] VLM-verifying top 40 candidates (difficulty + description)...
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+[hn] DONE — top 20 hard+novel scenes -> judge feed
+   D=0.60 nov=0.93 final=0.70  low_traction, sudden_maneuvers
+   D=0.60 nov=0.80 final=0.66  functioning_correctly
+   D=0.60 nov=0.69 final=0.63  slippery_road_surface, no_moving_vehicles
+   D=0.50 nov=0.89 final=0.62  cyclist_in_bike_lane, waiting_for_green_light
+   D=0.65 nov=0.48 final=0.60  clear_weather
+   D=0.60 nov=0.57 final=0.59  reduced_visibility, yielding_to_pedestrians
+   D=0.50 nov=0.78 final=0.58  proceeding_forward, vigilance_for_sudden_movements
+   D=0.50 nov=0.78 final=0.58  cyclist_in_bike_lane
+   D=0.59 nov=0.56 final=0.58  reduced_visibility
+   D=0.50 nov=0.71 final=0.56  vigilance_for_sudden_movements

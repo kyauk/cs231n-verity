@@ -57,6 +57,9 @@ READY_POLL_S = float(os.environ.get("GPU_READY_POLL_S", "3"))
 # how long to wait for an in-flight analysis run to finish before swapping.
 DRAIN_TIMEOUT_S = int(os.environ.get("GPU_DRAIN_TIMEOUT_S", "1200"))  # 20 min
 DRAIN_POLL_S = float(os.environ.get("GPU_DRAIN_POLL_S", "1"))
+# how long an analyze request will WAIT for an in-progress embed batch to finish
+# (queue instead of reject) before giving up.
+REASON_WAIT_TIMEOUT_S = int(os.environ.get("GPU_REASON_WAIT_TIMEOUT_S", str(DRAIN_TIMEOUT_S)))
 
 
 class GpuState(str, Enum):
@@ -70,6 +73,10 @@ class GpuState(str, Enum):
 
 class GpuBusyError(RuntimeError):
     """Raised when a reason1 call is attempted while the GPU is not REASON_READY."""
+
+
+class GpuUnavailableError(RuntimeError):
+    """Raised when reason1 genuinely cannot be brought up (swap failed)."""
 
 
 def _compose(*args: str) -> subprocess.CompletedProcess[str]:
@@ -151,24 +158,56 @@ class _GpuArbiter:
 
     # -- reason lease (analysis endpoint) -----------------------------------
     @contextlib.contextmanager
-    def reason_lease(self) -> Iterator[None]:
-        """Hold the GPU for a reason1 call. Raises GpuBusyError if not resting.
+    def reason_lease(self, on_stage: Callable[[str], None] | None = None) -> Iterator[None]:
+        """Hold the GPU for a reason1 call, bringing reason1 up if needed.
 
-        Acquiring increments the in-flight count so a concurrent embed_window()
-        waits for this call to finish before swapping (no mid-flight kill).
+        Reconcile-on-demand + queue — never reject for transient/stale state, so
+        the embed -> analyze handoff is automatic and survives restarts:
+          * An open embed window (a batch embedding) -> WAIT for it to finish
+            (its exit restores reason1), bounded by REASON_WAIT_TIMEOUT_S, rather
+            than reject. The caller is queued, not failed.
+          * reason1 down / stale state (GPU was off, runner restarted while
+            reason1 wasn't up) -> SWAP IT UP transparently.
+          * reason1 claims READY but isn't actually serving -> re-swap
+            (reconcile from reality, not from the last in-memory label).
+        Raises GpuUnavailableError only when reason1 truly cannot be started.
         """
-        with self._cv:
-            if self._state is not GpuState.REASON_READY:
-                raise GpuBusyError(
-                    "GPU busy — embedding an ingest batch. Try again when it finishes."
-                )
-            self._reason_inflight += 1
+        self._acquire_reason(on_stage)
         try:
             yield
         finally:
             with self._cv:
                 self._reason_inflight -= 1
                 self._cv.notify_all()
+
+    def _acquire_reason(self, on_stage: Callable[[str], None] | None) -> None:
+        deadline = time.monotonic() + REASON_WAIT_TIMEOUT_S
+        with self._cv:
+            # 1) Yield to an active embed batch (or another thread's embed swap):
+            #    wait for it to finish — its exit swaps the GPU back to reason1.
+            while self._embed_refs > 0 or self._state in (
+                GpuState.DRAINING, GpuState.SWAPPING_TO_EMBED,
+            ):
+                if time.monotonic() >= deadline:
+                    break  # bounded: a wedged batch can't hang analysis forever
+                self._cv.wait(timeout=min(2.0, max(0.1, deadline - time.monotonic())))
+
+            # 2) Reconcile from reality: make sure reason1 is ACTUALLY serving.
+            #    Covers GPU-off, post-restart stale state, and a died container
+            #    that still reads REASON_READY in memory.
+            if self._state is not GpuState.REASON_READY or not _is_ready(REASON_PORT):
+                self._set(GpuState.SWAPPING_TO_REASON, on_stage)
+                try:
+                    self._swap_to(REASON_SERVICE, REASON_PORT, EMBED_SERVICE)
+                except Exception as exc:  # noqa: BLE001
+                    self._last_error = str(exc)
+                    self._set(GpuState.DEGRADED, on_stage)
+                    raise GpuUnavailableError(
+                        f"Could not start the reasoning model (reason1): {exc}"
+                    ) from exc
+                self._set(GpuState.REASON_READY, on_stage)
+
+            self._reason_inflight += 1
 
     # -- embed window (ingest cluster stage) --------------------------------
     @contextlib.contextmanager

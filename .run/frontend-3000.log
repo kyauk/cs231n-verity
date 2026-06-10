@@ -6,13 +6,48 @@
 - Local:         http://localhost:3000
 - Network:       http://172.27.41.141:3000
 - Environments: .env.local
-✓ Ready in 258ms
+✓ Ready in 250ms
 
- GET / 200 in 565ms (next.js: 162ms, application-code: 404ms)
- GET / 200 in 50ms (next.js: 3ms, application-code: 46ms)
+ GET / 200 in 422ms (next.js: 124ms, application-code: 297ms)
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
 [browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
 [browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+ GET / 200 in 44ms (next.js: 5ms, application-code: 39ms)
+ GET / 200 in 38ms (next.js: 2ms, application-code: 35ms)
+ GET / 200 in 39ms (next.js: 1761µs, application-code: 37ms)
+  Reload env: .env.local
+✓ Compiled in 24ms
+ GET / 200 in 93ms (next.js: 51ms, application-code: 42ms)
+✓ Compiled in 334ms
+✓ Compiled in 70ms
+✓ Compiled in 45ms
+✓ Compiled in 117ms
+ GET / 200 in 102ms (next.js: 56ms, application-code: 45ms)
+ GET / 200 in 15ms (next.js: 3ms, application-code: 12ms)
+ GET / 200 in 14ms (next.js: 1985µs, application-code: 12ms)
+✓ Compiled in 60ms
+ GET / 200 in 85ms (next.js: 45ms, application-code: 40ms)
+ GET / 200 in 19ms (next.js: 1811µs, application-code: 17ms)
+ GET / 200 in 259ms (next.js: 3ms, application-code: 257ms)
+ GET / 200 in 36ms (next.js: 2ms, application-code: 34ms)
+ GET / 200 in 43ms (next.js: 3ms, application-code: 40ms)
+ GET / 200 in 42ms (next.js: 3ms, application-code: 40ms)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+[browser] Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.

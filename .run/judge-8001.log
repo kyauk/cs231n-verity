@@ -1,32 +1,28 @@
-INFO:     Started server process [122771]
+INFO:     Started server process [26076]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-[JudgeUI] Loaded 30 proposals (27 accepted) from /home/ubuntu/NVIDIA-ADR-1/outputs/session-1/scored.json
+[JudgeUI] Loaded 20 proposals (20 accepted) from /home/ubuntu/NVIDIA-ADR-1/outputs/waymo/judge_scored.json
 [JudgeUI] WindowStorage initialized for gs://nvidia-adr-waymo-segment-videos/verity
-INFO:     127.0.0.1:48998 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49008 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51268 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51272 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54120 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45160 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:45166 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60050 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60054 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60064 - "GET /judge/proposals/d77801d12689ce4a HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52888 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52902 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32930 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32934 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55234 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55238 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56772 - "GET /judge/proposals/02e50364855477e1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47358 - "POST /judge/ratings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47372 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34292 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34304 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55094 - "GET /judge/proposals HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55110 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51366 - "GET /judge/proposals/95f3c4c2658134e8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49128 - "GET /judge/session/jason HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49138 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38022 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58862 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41852 - "GET /judge/proposals?_t=1780630106349 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41836 - "GET /judge/session/jason HTTP/1.1" 200 OK
+[JudgeUI] Loaded 20 proposals (20 accepted) from /home/ubuntu/NVIDIA-ADR-1/outputs/waymo/judge_scored.json
+INFO:     127.0.0.1:55538 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51112 - "GET /judge/session/sd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51122 - "GET /judge/proposals?_t=1780633201210 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51132 - "GET /judge/proposals/11236550977973464715_3620_000_3640_000 HTTP/1.1" 200 OK
+/home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+INFO:     127.0.0.1:34048 - "GET /judge/video-url?segment_id=11236550977973464715_3620_000_3640_000&window_idx=0&camera=FRONT HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55040 - "GET /judge/proposals/16977844994272847523_2140_000_2160_000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34930 - "GET /judge/video-url?segment_id=16977844994272847523_2140_000_2160_000&window_idx=0&camera=FRONT HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34932 - "GET /judge/segment-video/16977844994272847523_2140_000_2160_000?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:34948 - "GET /judge/segment-video/16977844994272847523_2140_000_2160_000?camera=FRONT HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:43100 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:42086 - "GET /judge/proposals HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [26076]

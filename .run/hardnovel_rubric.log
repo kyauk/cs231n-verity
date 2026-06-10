@@ -2,3 +2,15 @@
 [hn] VLM-verifying top 40 candidates (difficulty + description)...
 /home/ubuntu/NVIDIA-ADR-1/.venv/lib/python3.10/site-packages/google/api_core/_python_version_support.py:273: FutureWarning: You are using a Python version (3.10.12) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
   warnings.warn(message, FutureWarning)
+
+[hn] DONE — top 20 hard+novel scenes -> judge feed
+   D=-1.00 nov=0.93 final=0.70  low_traction, sudden_maneuvers
+   D=-1.00 nov=0.69 final=0.70  slippery_road_surface, no_moving_vehicles
+   D=-1.00 nov=0.45 final=0.69  stopped_at_red_light, stopping_at_red_light
+   D=-1.00 nov=0.67 final=0.69  overcast_weather, stopped_at_red_light
+   D=-1.00 nov=0.61 final=0.67  reduced_visibility, slippery_road_surface, following_distance
+   D=-1.00 nov=0.58 final=0.66  yielding_to_pedestrians
+   D=-1.00 nov=0.56 final=0.66  reduced_visibility
+   D=-1.00 nov=1.00 final=0.65  potential_hazard
+   D=-1.00 nov=0.53 final=0.65  clear_weather, stopped_at_red_light, yielding_to_pedestrians
+   D=-1.00 nov=0.52 final=0.65  stopped_at_red_light
