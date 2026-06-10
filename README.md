@@ -1,5 +1,7 @@
 # Verity — Autonomous-Vehicle Safety Scenario Discovery
 
+> **AI Usage Disclosure (CS231N).** This repository is an extension of an existing project. The CS231N contribution is the `pipeline/` directory — specifically, everything in `pipeline/` **except** the `clustering` and `debate` modules (those two are part of the original project). AI was used to **generate majority of the code**, and care was taken to keep the pipeline and codebase clean. The **system design and ideation were entirely the author's own**; AI was used only to help **stress-test the idea**, strengthening the design and ideation.
+
 Verity mines real driving footage to surface the **edge cases your AV stack has not been validated against** — operationally difficult and under-represented scenes — and turns them into **structured, simulator-ready scenario specifications** your team can prioritize, generate, and test.
 
 You bring driving data. Verity annotates it, discovers the rare and difficult scenes, ranks them by how hard they are for an automated driver, and presents them for human review with supporting evidence and a generation-ready description for each.
